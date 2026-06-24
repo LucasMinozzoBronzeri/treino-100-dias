@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meu Treino 100 Dias</title>
+  <meta name="theme-color" content="#ff7a00" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Meu Treino" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Controle de treino</p>
+        <h1>Meu Treino</h1>
+      </div>
+      <div class="progress-pill">
+        <span id="progressText">0/100</span>
+      </div>
+    </header>
+
+    <section id="pendingBox" class="pending hidden">
+      <div class="pending-title">ATENÇÃO</div>
+      <p id="pendingMessage"></p>
+      <button id="confirmAcademyBtn" class="btn danger-outline">Já finalizei no app da academia</button>
+    </section>
+
+    <section class="next-card">
+      <p class="section-label">Próximo treino</p>
+      <h2 id="nextWorkoutTitle">A - Peito + Bíceps</h2>
+      <button id="startNextBtn" class="btn primary">Abrir treino</button>
+    </section>
+
+    <section class="queue-card">
+      <div class="section-row">
+        <p class="section-label">Fila atual</p>
+        <button id="resetBtn" class="link-btn">Resetar</button>
+      </div>
+      <div id="workoutQueue" class="workout-grid"></div>
+    </section>
+
+    <section class="history-card">
+      <div class="section-row">
+        <p class="section-label">Histórico</p>
+        <button id="undoBtn" class="link-btn">Desfazer último</button>
+      </div>
+      <div id="historyList" class="history-list"></div>
+    </section>
+
+    <section class="backup-card">
+      <p class="section-label">Backup</p>
+      <p class="backup-text">Exporte seus dados para guardar progresso, cargas, histórico e pendências. Importe o arquivo para recuperar tudo neste ou em outro celular.</p>
+      <div class="backup-actions">
+        <button id="exportBackupBtn" class="btn secondary">Exportar backup</button>
+        <button id="importBackupBtn" class="btn secondary">Importar backup</button>
+      </div>
+      <input id="backupFileInput" type="file" accept="application/json,.json" class="hidden" />
+    </section>
+  </main>
+
+  <div id="workoutModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" id="closeModalArea"></div>
+    <section class="modal-panel" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Treino selecionado</p>
+          <h2 id="modalTitle">Treino A</h2>
+        </div>
+        <button id="closeModalBtn" class="icon-btn" aria-label="Fechar">×</button>
+      </div>
+
+      <div id="exerciseList" class="exercise-list"></div>
+
+      <div class="modal-actions">
+        <button id="finishWorkoutBtn" class="btn primary full">Finalizar treino</button>
+        <p class="small-warning">Ao finalizar, ele entra como pendente para baixa no app da academia.</p>
+      </div>
+    </section>
+  </div>
+
+  <div id="confirmModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop"></div>
+    <section class="confirm-panel" role="dialog" aria-modal="true">
+      <h2>Finalizar treino?</h2>
+      <p id="confirmText">Você deseja finalizar este treino?</p>
+      <div class="confirm-actions">
+        <button id="cancelFinishBtn" class="btn secondary">Cancelar</button>
+        <button id="confirmFinishBtn" class="btn primary">Sim, finalizar</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("service-worker.js").catch(console.error);
+      });
+    }
+  </script>
+</body>
+</html>
