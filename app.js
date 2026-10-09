@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'treino100Pro.v1';
+const AI_ENDPOINT_PATH = '/api/workout-report';
 
 const DEFAULT_WORKOUTS = [
   { id:'A', name:'Peito + Bíceps', focus:'Parte superior', exercises:[
@@ -41,12 +42,21 @@ function newProfile(name='Novo perfil'){
   return {
     id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, age:'', height:'', weight:'', goal:'', focus:'', notes:'',
     queue: ['A','B','C','D','E'], progress: 0, target: 100, workouts: structuredClone(DEFAULT_WORKOUTS),
-    weights:{}, exerciseMeta:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], createdAt: nowISO()
+    weights:{}, exerciseMeta:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], ai:{apiUrl:'', appToken:'', autoWorkoutReport:false}, createdAt: nowISO()
   };
 }
 function load(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultState(); } catch { return defaultState(); } }
 function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-function profile(){ return state.profiles.find(p=>p.id===state.activeProfileId) || state.profiles[0]; }
+function profile(){ const p = state.profiles.find(p=>p.id===state.activeProfileId) || state.profiles[0]; return ensureProfile(p); }
+function ensureProfile(p){
+  if(!p) return p;
+  if(!p.ai) p.ai={apiUrl:'', appToken:'', autoWorkoutReport:false};
+  if(typeof p.ai.autoWorkoutReport !== 'boolean') p.ai.autoWorkoutReport = !!p.ai.autoWorkoutReport;
+  if(!Array.isArray(p.history)) p.history=[];
+  if(!Array.isArray(p.checkins)) p.checkins=[];
+  if(!Array.isArray(p.bio)) p.bio=[];
+  return p;
+}
 function nowISO(){ return new Date().toISOString(); }
 function todayBR(d=new Date()){ return d.toLocaleDateString('pt-BR'); }
 function fmtDate(iso){ return new Date(iso).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit', year:'numeric'}); }
@@ -116,7 +126,7 @@ function renderProgress(){
   return `<section class="hero"><div class="hero-row"><div><p class="eyebrow">Evolução</p><h2>${p.progress}/${p.target} treinos</h2><p>${cycles} ciclos completos. Acompanhe cargas, consistência e estagnações.</p></div><div class="progress-ring" style="--p:${Math.round(p.progress/p.target*100)}%"><div class="progress-ring-inner">${p.progress}<small>treinos</small></div></div></div></section>
   <section class="grid two"><div class="stat"><strong>${gains.filter(g=>g.delta>0).length}</strong><span>exercícios com evolução</span></div><div class="stat"><strong>${stagnated(p).length}</strong><span>possíveis estagnados</span></div></section>
   <section class="card"><div class="card-title"><h3>Top evolução de carga</h3><p>Comparando primeiro e último registro</p></div>${gains.length?gains.slice(0,8).map(g=>`<div class="history-row"><div><strong>${esc(g.name)}</strong><span>${g.first} → ${g.last}</span></div><span class="badge green">+${g.delta}</span></div>`).join(''):'<div class="empty">Ainda não há histórico suficiente.</div>'}</section>
-  <section class="card"><div class="card-title"><h3>Últimos treinos</h3></div>${p.history.slice(-8).reverse().map(h=>`<div class="history-row"><div><strong>${h.workoutId} — ${esc(h.workoutName)}</strong><span>${fmtDate(h.date)} • ${h.doneCount} concluídos • ${h.skippedCount} pulados</span></div><span class="badge">${h.score}%</span></div>`).join('') || '<div class="empty">Nenhum treino finalizado ainda.</div>'}</section>`;
+  <section class="card"><div class="card-title"><h3>Últimos treinos</h3></div>${p.history.slice(-8).reverse().map(h=>historyRowHTML(h)).join('') || '<div class="empty">Nenhum treino finalizado ainda.</div>'}</section>`;
 }
 function exerciseGains(p){
   const first={}, last={};
@@ -138,7 +148,13 @@ function renderCheckin(){
   <section class="card"><div class="card-title"><h3>Bioimpedância / medidas</h3></div>${p.bio.length?p.bio.slice().reverse().map(b=>`<div class="history-row"><div><strong>${fmtDate(b.date)} — ${b.weight||'--'} kg</strong><span>Gordura: ${b.bodyFat||'--'}% • Massa magra: ${b.leanMass||'--'} kg • Cintura: ${b.waist||'--'} cm</span></div><span class="badge orange">Bio</span></div>`).join(''):'<div class="empty">Nenhuma avaliação inserida.</div>'}</section>`;
 }
 
-function renderCoach(){ const insights=generateInsights(profile()); return `<section class="hero"><p class="eyebrow">Coach local</p><h2>Análise inteligente</h2><p>Esta análise usa regras locais do app. Não é IA online ainda, mas já cruza treino, cargas, cardio, check-ins e bioimpedância.</p></section><section class="grid">${insights.map(i=>`<div class="alert ${i.type==='orange'?'orange':''}"><div>${i.icon}</div><div><strong>${esc(i.title)}</strong><p>${esc(i.text)}</p></div></div>`).join('')}</section>`; }
+function renderCoach(){
+  const p=profile(); const insights=generateInsights(p); const aiOn=aiConfigured(p); const reports=p.history.filter(h=>h.aiReport || h.aiReportStatus || h.aiReportError).slice(-5).reverse();
+  return `<section class="hero"><p class="eyebrow">Coach</p><h2>Análise inteligente</h2><p>${aiOn?'IA online configurada. Ao finalizar treino, o app pode gerar um relatório automático.':'Hoje o app usa análise local. Configure a Vercel/API no Perfil para ativar IA online.'}</p><div class="actions"><button class="btn secondary" data-screen-go="profile">Configurar IA</button></div></section>
+  <section class="card"><div class="card-title"><h3>Status da IA</h3><span class="badge ${aiOn?'green':'yellow'}">${aiOn?'Online pronta':'Local/offline'}</span></div><p class="muted">Relatório automático ao finalizar treino: <strong>${p.ai?.autoWorkoutReport?'ativado':'desativado'}</strong></p></section>
+  <section class="grid">${insights.map(i=>`<div class="alert ${i.type==='orange'?'orange':''}"><div>${i.icon}</div><div><strong>${esc(i.title)}</strong><p>${esc(i.text)}</p></div></div>`).join('')}</section>
+  <section class="card"><div class="card-title"><h3>Últimos relatórios da IA</h3><p>Gerados ao finalizar treino</p></div>${reports.length?reports.map(h=>aiHistoryHTML(h)).join(''):'<div class="empty">Nenhum relatório de IA salvo ainda.</div>'}</section>`;
+}
 function generateInsights(p){
   const out=[]; const cycles=Math.floor(p.progress/5); const st=stagnated(p);
   out.push({icon:'🔥',title:`${p.progress}/${p.target} treinos concluídos`,text:`Você completou ${cycles} ciclos. Próxima meta: ${Math.min(p.target, (cycles+1)*5)} treinos.`,type:'orange'});
@@ -151,9 +167,26 @@ function generateInsights(p){
 }
 function compareBio(a,b){ const parts=[]; [['weight','Peso','kg'],['bodyFat','Gordura','%'],['leanMass','Massa magra','kg'],['waist','Cintura','cm']].forEach(([k,n,u])=>{const x=parseFloat(a[k]), y=parseFloat(b[k]); if(!isNaN(x)&&!isNaN(y)){ const d=+(y-x).toFixed(1); parts.push(`${n}: ${d>0?'+':''}${d}${u}`); }}); return parts.length?parts.join(' • '):'Duas avaliações salvas; preencha mais campos para comparação melhor.'; }
 
-function renderProfile(){ const p=profile(); return `<section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais, sem login.</p></div><div class="form-grid">
+function aiHistoryHTML(h){
+  const badge = h.aiReportStatus==='pending' ? '<span class="badge yellow">Gerando</span>' : h.aiReportError ? '<span class="badge red">Erro</span>' : '<span class="badge green">IA</span>';
+  const body = h.aiReport ? `<div class="ai-report"><strong>${esc(h.aiReport.title||'Relatório da IA')}</strong><p>${esc(h.aiReport.summary||'')}</p>${h.aiReport.evolution?`<p><b>Evolução:</b> ${esc(h.aiReport.evolution)}</p>`:''}${h.aiReport.attention?`<p><b>Atenção:</b> ${esc(h.aiReport.attention)}</p>`:''}${h.aiReport.nextGoal?`<p><b>Próxima meta:</b> ${esc(h.aiReport.nextGoal)}</p>`:''}</div>` : h.aiReportError ? `<div class="ai-report error"><strong>Erro ao gerar IA</strong><p>${esc(h.aiReportError)}</p></div>` : '<div class="ai-report"><p>Relatório em processamento...</p></div>';
+  return `<div class="history-row ai-row"><div><strong>${h.workoutId} — ${esc(h.workoutName)}</strong><span>${fmtDate(h.date)}</span>${body}</div>${badge}</div>`;
+}
+function historyRowHTML(h){
+  const aiBadge = h.aiReport ? '<span class="badge green">IA</span>' : h.aiReportStatus==='pending' ? '<span class="badge yellow">IA...</span>' : h.aiReportError ? '<span class="badge red">IA erro</span>' : '';
+  const report = h.aiReport ? `<div class="ai-report compact"><p>${esc(h.aiReport.summary||'Relatório salvo.')}</p>${h.aiReport.nextGoal?`<p><b>Meta:</b> ${esc(h.aiReport.nextGoal)}</p>`:''}</div>` : '';
+  return `<div class="history-row"><div><strong>${h.workoutId} — ${esc(h.workoutName)}</strong><span>${fmtDate(h.date)} • ${h.doneCount} concluídos • ${h.skippedCount} pulados</span>${report}</div><div class="badge-stack"><span class="badge">${h.score}%</span>${aiBadge}</div></div>`;
+}
+
+
+function renderProfile(){ const p=profile(); const ai=p.ai||{}; return `<section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais, sem login.</p></div><div class="form-grid">
   ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}
   <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div></div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button><button class="btn secondary" data-action="new-profile">Novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
+  <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Não cole a OpenAI API key aqui. Ela fica só na Vercel.</p></div><span class="badge ${aiConfigured(p)?'green':'yellow'}">${aiConfigured(p)?'Pronta':'Pendente'}</span></div><div class="form-grid">
+    <div class="field" style="grid-column:1/-1"><label>URL do backend Vercel</label><input class="input" data-ai-field="apiUrl" value="${esc(ai.apiUrl||'')}" placeholder="https://treino-100-api.vercel.app"></div>
+    <div class="field" style="grid-column:1/-1"><label>APP_TOKEN</label><input class="input" data-ai-field="appToken" value="${esc(ai.appToken||'')}" placeholder="mesmo token configurado na Vercel"></div>
+    <label class="toggle-row" style="grid-column:1/-1"><input type="checkbox" data-ai-field="autoWorkoutReport" ${ai.autoWorkoutReport?'checked':''}> <span>Gerar relatório automaticamente ao finalizar treino</span></label>
+  </div><div class="actions"><button class="btn" data-action="save-profile">Salvar configuração</button><button class="btn secondary" data-action="test-ai">Testar IA</button></div><p class="muted">A URL pode ser a base da Vercel ou o endpoint completo /api/workout-report.</p></section>
   <section class="card"><div class="card-title"><h3>Perfis</h3><p>${state.profiles.length} perfil(is)</p></div><div class="profile-list">${state.profiles.map(x=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc(x.name.charAt(0).toUpperCase())}</div><div><strong>${esc(x.name)}</strong><div class="small">${x.progress}/${x.target} treinos</div></div></div><button class="btn sm ${x.id===state.activeProfileId?'green':'secondary'}" data-switch-profile="${x.id}">${x.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div></section>
   <section class="card"><div class="card-title"><h3>Zona perigosa</h3></div><button class="btn danger full" data-action="reset-profile">Resetar perfil ativo</button></section>`; }
 function inputHTML(id,label,val,type='text'){ return `<div class="field"><label>${label}</label><input class="input" type="${type}" data-profile-field="${id}" value="${esc(val)}"></div>`; }
@@ -174,9 +207,19 @@ function handleAction(a){
   if(a==='new-checkin') openCheckinModal();
   if(a==='new-bio') openBioModal();
   if(a==='edit-current-workout') openEditWorkout(currentWorkout().id);
+  if(a==='test-ai') testAIConnection();
 }
 
-function saveProfileForm(){ const p=profile(); document.querySelectorAll('[data-profile-field]').forEach(f=>p[f.dataset.profileField]=f.value); save(); toast('Perfil salvo.'); render(); }
+function saveProfileForm(){
+  const p=profile();
+  document.querySelectorAll('[data-profile-field]').forEach(f=>p[f.dataset.profileField]=f.value);
+  document.querySelectorAll('[data-ai-field]').forEach(f=>{
+    const k=f.dataset.aiField;
+    if(k==='autoWorkoutReport') p.ai[k]=f.checked;
+    else p.ai[k]=f.value.trim();
+  });
+  save(); toast('Perfil salvo.'); render();
+}
 function createProfileFlow(){ const name=prompt('Nome do novo perfil:'); if(!name) return; const p=newProfile(name); state.profiles.push(p); state.activeProfileId=p.id; save(); render(); toast('Perfil criado.'); }
 function resetProfileFlow(){ const p=profile(); if(!confirm(`Resetar TODO o perfil ${p.name}? Isso apaga treinos, cargas, histórico, check-ins e bioimpedância.`)) return; const t=prompt('Digite RESETAR para confirmar:'); if(t!=='RESETAR') return toast('Reset cancelado.'); const fresh=newProfile(p.name); fresh.id=p.id; state.profiles[state.profiles.findIndex(x=>x.id===p.id)] = fresh; save(); render(); toast('Perfil resetado.'); }
 
@@ -264,16 +307,23 @@ function wireEditWorkoutModal(id){
 }
 
 function meta(id){ const p=profile(); if(!p.exerciseMeta[id]) p.exerciseMeta[id]={}; return p.exerciseMeta[id]; }
-function toggleDone(id){ const p=profile(); p.tempDone[id]=!p.tempDone[id]; if(p.tempDone[id]) p.tempStatus[id]='done'; else delete p.tempStatus[id]; save(); openWorkout(activeModalWorkout); }
-function skipExercise(id){ const p=profile(); p.tempDone[id]=false; p.tempStatus[id]='skipped'; save(); openWorkout(activeModalWorkout); }
+function modalScrollTop(){ const m=document.querySelector('#modalLayer .modal'); return m ? m.scrollTop : 0; }
+function restoreModalScroll(y){ requestAnimationFrame(()=>{ const m=document.querySelector('#modalLayer .modal'); if(m) m.scrollTop = y || 0; }); }
+function refreshWorkoutKeepingScroll(){ const y=modalScrollTop(); openWorkout(activeModalWorkout); restoreModalScroll(y); }
+function toggleDone(id){ const p=profile(); p.tempDone[id]=!p.tempDone[id]; if(p.tempDone[id]) p.tempStatus[id]='done'; else delete p.tempStatus[id]; save(); refreshWorkoutKeepingScroll(); }
+function skipExercise(id){ const p=profile(); p.tempDone[id]=false; p.tempStatus[id]='skipped'; save(); refreshWorkoutKeepingScroll(); }
 function closeModal(){ byId('modalLayer').classList.add('hidden'); byId('modalLayer').innerHTML=''; render(); }
 function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toast(`Bloqueado. O próximo treino correto é ${p.queue[0]}.`); const w=workoutById(p,id); const doneCount=w.exercises.filter(e=>p.tempDone[e.id]).length; const skippedCount=w.exercises.filter(e=>p.tempStatus[e.id]==='skipped').length;
   if(!confirm(`Finalizar o treino ${id}?\n\nConcluídos: ${doneCount}\nPulados: ${skippedCount}`)) return;
   const weights={}, status={}, metaSnap={}; w.exercises.forEach(e=>{ if(p.weights[e.id]) weights[e.id]=p.weights[e.id]; if(p.tempStatus[e.id]) status[e.id]=p.tempStatus[e.id]; if(p.exerciseMeta[e.id]) metaSnap[e.id]={...p.exerciseMeta[e.id]}; });
   const score = Math.max(0, Math.round(((doneCount + skippedCount*.35) / w.exercises.length) * 100));
-  p.history.push({id:'h_'+Date.now(), date:nowISO(), workoutId:id, workoutName:w.name, doneCount, skippedCount, score, weights, status, meta:metaSnap});
+  const record = {id:'h_'+Date.now(), date:nowISO(), workoutId:id, workoutName:w.name, doneCount, skippedCount, score, weights, status, meta:metaSnap};
+  if(aiConfigured(p) && p.ai.autoWorkoutReport) record.aiReportStatus='pending';
+  p.history.push(record);
   p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={};
-  save(); closeModal(); toast('Treino finalizado com sucesso.');
+  save(); closeModal(); toast(record.aiReportStatus==='pending' ? 'Treino finalizado. Gerando relatório com IA...' : 'Treino finalizado com sucesso.');
+  if(record.aiReportStatus==='pending') generateWorkoutAIReport(p.id, record.id);
+
 }
 
 function openProfileSwitcher(){ const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Perfil</p><h2>Quem está treinando?</h2></div><button class="close" data-close>×</button></div><div class="profile-list">${state.profiles.map(p=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc(p.name.charAt(0).toUpperCase())}</div><div><strong>${esc(p.name)}</strong><div class="small">${p.progress}/${p.target} treinos</div></div></div><button class="btn sm ${p.id===state.activeProfileId?'green':'secondary'}" data-modal-switch-profile="${p.id}">${p.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div><div class="actions"><button class="btn" data-modal-new-profile>Novo perfil</button></div></div>`; layer.classList.remove('hidden'); document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=()=>{state.activeProfileId=b.dataset.modalSwitchProfile; save(); closeModal();}); document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();}; }
@@ -285,6 +335,79 @@ function compressImage(file){ return new Promise((resolve,reject)=>{ if(!file) r
 function openBioModal(){ const p=profile(); const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Bioimpedância</p><h2>Inserir avaliação</h2><p class="muted">Você pode preencher manualmente ou tentar extrair texto de um PDF.</p></div><button class="close" data-close>×</button></div><div class="field"><label>PDF da bioimpedância opcional</label><input class="input" id="bioPdf" type="file" accept="application/pdf"></div><div class="actions"><button class="btn secondary" data-parse-pdf>Tentar ler PDF</button></div><div class="form-grid">${['date:Data','weight:Peso','height:Altura','imc:IMC','bodyFat:% gordura','fatMass:Massa gorda','leanMass:Massa magra','water:% água','visceral:Gordura visceral','metabolicAge:Idade metabólica','waist:Cintura','abdomen:Abdômen','hip:Quadril','arm:Braço','thigh:Coxa','calf:Panturrilha'].map(x=>{const [id,label]=x.split(':'); return `<div class="field"><label>${label}</label><input class="input" id="bio_${id}"></div>`}).join('')}<div class="field" style="grid-column:1/-1"><label>Observações</label><textarea id="bio_notes"></textarea></div></div><div class="actions"><button class="btn" data-save-bio>Salvar avaliação</button><button class="btn secondary" data-close>Cancelar</button></div></div>`; layer.classList.remove('hidden'); byId('bio_date').value = new Date().toISOString().slice(0,10); document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelector('[data-save-bio]').onclick=()=>{ const obj={id:'b_'+Date.now(), date:byId('bio_date').value?new Date(byId('bio_date').value).toISOString():nowISO()}; ['weight','height','imc','bodyFat','fatMass','leanMass','water','visceral','metabolicAge','waist','abdomen','hip','arm','thigh','calf'].forEach(k=>obj[k]=byId('bio_'+k)?.value || ''); obj.notes=byId('bio_notes')?.value || ''; p.bio.push(obj); save(); closeModal(); toast('Bioimpedância salva.');}; document.querySelector('[data-parse-pdf]').onclick=parseBioPdf; }
 async function parseBioPdf(){ const file=byId('bioPdf').files[0]; if(!file) return toast('Selecione um PDF.'); if(!window.pdfjsLib) return toast('Leitor PDF indisponível. Preencha manualmente.'); try{ pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; const buf=await file.arrayBuffer(); const pdf=await pdfjsLib.getDocument({data:buf}).promise; let text=''; for(let i=1;i<=pdf.numPages;i++){ const page=await pdf.getPage(i); const content=await page.getTextContent(); text += ' ' + content.items.map(it=>it.str).join(' '); } fillBioFromText(text); toast('PDF lido. Confira os dados antes de salvar.'); }catch(e){ toast('Não consegui ler esse PDF. Preencha manualmente.'); } }
 function fillBioFromText(t){ const get=(re)=>{const m=t.match(re); return m?m[1].replace(',', '.'):''}; const date=t.match(/Data[:\s]+(\d{2}\/\d{2}\/\d{4})/i); if(date){ const [d,m,y]=date[1].split('/'); byId('bio_date').value=`${y}-${m}-${d}`; } const map={ weight:/Peso\s+(\d+[,.]?\d*)\s*Kg/i, height:/Altura\s+(\d+[,.]?\d*)\s*m/i, imc:/IMC\s+(\d+[,.]?\d*)/i, fatMass:/Massa Gorda\s+(\d+[,.]?\d*)\s*Kg/i, bodyFat:/%\s*Massa Gorda\s+(\d+[,.]?\d*)%?/i, leanMass:/Massa Magra\s+(\d+[,.]?\d*)\s*Kg/i, water:/%\s*Água Corporal\s+(\d+[,.]?\d*)%?/i, visceral:/Gordura Visceral\s+(\d+[,.]?\d*)%?/i, metabolicAge:/Idade Metabólica\s+(\d+)/i, waist:/Cintura\s+(\d+[,.]?\d*)\s*cm/i, abdomen:/Abdômen\s+(\d+[,.]?\d*)\s*cm/i, hip:/Quadril\s+(\d+[,.]?\d*)\s*cm/i, calf:/Panturrilha direita\s+(\d+[,.]?\d*)\s*cm/i}; Object.entries(map).forEach(([k,re])=>{ const v=get(re); if(v && byId('bio_'+k)) byId('bio_'+k).value=v; }); }
+
+
+function aiConfigured(p=profile()){
+  return !!(p?.ai?.apiUrl && String(p.ai.apiUrl).trim());
+}
+function aiUrl(p=profile(), path=AI_ENDPOINT_PATH){
+  const base=String(p.ai?.apiUrl||'').trim().replace(/\/+$/,'');
+  if(!base) return '';
+  if(base.endsWith(path)) return base;
+  return base + path;
+}
+function buildWorkoutAIPayload(p, h){
+  const w=workoutById(p,h.workoutId);
+  const exerciseDetails=(w?.exercises||[]).map(e=>({
+    id:e.id,
+    name:e.name,
+    type:e.type,
+    target:e.target,
+    status:h.status?.[e.id] || 'not_done',
+    weight:h.weights?.[e.id] || '',
+    meta:h.meta?.[e.id] || {}
+  }));
+  const previousSame=p.history.filter(x=>x.id!==h.id && x.workoutId===h.workoutId).slice(-3).map(x=>({date:x.date, score:x.score, weights:x.weights, status:x.status, meta:x.meta}));
+  return {
+    kind:'workout-report',
+    profile:{name:p.name, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, notes:p.notes},
+    workout:{id:h.workoutId, name:h.workoutName, date:h.date, score:h.score, doneCount:h.doneCount, skippedCount:h.skippedCount, exercises:exerciseDetails},
+    previousSameWorkout:previousSame,
+    latestBio:p.bio?.slice(-1)[0] || null,
+    recentHistory:p.history.slice(-8).map(x=>({date:x.date, workoutId:x.workoutId, workoutName:x.workoutName, score:x.score, doneCount:x.doneCount, skippedCount:x.skippedCount}))
+  };
+}
+async function generateWorkoutAIReport(profileId, historyId){
+  const p=ensureProfile(state.profiles.find(x=>x.id===profileId));
+  if(!p) return;
+  const h=p.history.find(x=>x.id===historyId);
+  if(!h) return;
+  try{
+    const response=await fetch(aiUrl(p),{
+      method:'POST',
+      headers:{'Content-Type':'application/json', ...(p.ai.appToken?{'x-app-token':p.ai.appToken}:{})},
+      body:JSON.stringify(buildWorkoutAIPayload(p,h))
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(data.error || `Erro HTTP ${response.status}`);
+    h.aiReport=data.report || {title:'Relatório da IA', summary:data.text || 'Relatório gerado.'};
+    h.aiReportStatus='done';
+    h.aiReportError='';
+    save(); render(); toast('Relatório da IA salvo.');
+  }catch(err){
+    h.aiReportStatus='error';
+    h.aiReportError=err.message || 'Erro desconhecido';
+    save(); render(); toast('Não consegui gerar o relatório da IA.');
+  }
+}
+async function testAIConnection(){
+  saveProfileForm();
+  const p=profile();
+  if(!aiConfigured(p)) return toast('Informe a URL da Vercel primeiro.');
+  const fake={id:'test_'+Date.now(),date:nowISO(),workoutId:'TESTE',workoutName:'Teste de conexão',score:100,doneCount:1,skippedCount:0,weights:{},status:{},meta:{}};
+  try{
+    const response=await fetch(aiUrl(p),{
+      method:'POST',
+      headers:{'Content-Type':'application/json', ...(p.ai.appToken?{'x-app-token':p.ai.appToken}:{})},
+      body:JSON.stringify({kind:'health-check', profile:{name:p.name, goal:p.goal}, workout:{id:'TESTE', name:'Teste'}, previousSameWorkout:[]})
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(data.error || `Erro HTTP ${response.status}`);
+    toast('IA respondeu com sucesso.');
+  }catch(err){
+    toast('Teste falhou: '+(err.message||'erro'));
+  }
+}
 
 function exportBackup(){ state.lastBackupAt=nowISO(); save(); const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`treino100-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href); }
 document.addEventListener('change', e=>{ if(e.target?.id==='backupInput'){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ const data=JSON.parse(r.result); if(!data.profiles) throw new Error(); if(confirm('Importar backup e substituir dados atuais?')){ state=data; save(); render(); toast('Backup importado.'); } }catch{ toast('Backup inválido.'); }}; r.readAsText(f); }});
