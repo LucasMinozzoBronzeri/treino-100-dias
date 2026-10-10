@@ -1,32 +1,37 @@
-Treino 100 Dias Pro - v5 Supabase
+Treino 100 Dias Pro v5.2 — Supabase + IA com login
 
-Novidades:
-- Conta e sincronização no Perfil
-- Login/criar conta via Supabase email/senha
-- App continua funcionando sem login, salvando localmente
-- Com login, salva treino, exercícios e relatórios IA no Supabase
-- Botão para sincronizar histórico local com a nuvem
+O que mudou nesta versão:
+- Login/criação de conta via Supabase.
+- Sem login: app continua funcionando e salva só no aparelho.
+- Com login: salva também na nuvem/Supabase.
+- A IA não usa APP_TOKEN fixo no frontend.
+- Para gerar relatório com IA, o usuário precisa estar logado e online.
+- O app mostra aviso de modo offline.
 
-Config Supabase usada no app:
-SUPABASE_URL=https://ppmlzpyxqtsgyhsyiuuh.supabase.co
-A chave usada é a anon public key. Não use service_role no frontend.
+Como publicar:
+1. Substitua os arquivos da raiz do repositório do app por estes arquivos.
+2. Aguarde o GitHub Pages atualizar.
+3. Abra com cache novo:
+   https://lucasminozzobronzeri.github.io/treino-100-dias/?v=supabase-5-2
 
-Depois de subir no GitHub Pages, abra com:
-https://lucasminozzobronzeri.github.io/treino-100-dias/?v=supabase-1
+Backend necessário:
+Suba também o backend v5.2 na Vercel.
+
+Variáveis necessárias no backend Vercel:
+- GEMINI_API_KEY
+- GEMINI_MODEL=gemini-3.5-flash-lite
+- SUPABASE_URL=https://ppmlzpyxqtsgyhsyiuuh.supabase.co
+- SUPABASE_ANON_KEY=anon public key do Supabase
+- ALLOWED_ORIGIN=https://lucasminozzobronzeri.github.io
+
+Pode remover/ignorar:
+- APP_TOKEN
+- OPENAI_API_KEY
+- OPENAI_MODEL
 
 Teste recomendado:
-1. Exportar backup antes de atualizar.
-2. Subir arquivos na raiz do repo.
-3. Abrir com ?v=supabase-1.
-4. Testar sem login.
-5. Criar conta/login.
-6. Finalizar um treino e conferir tabelas workout_logs, exercise_logs e ai_reports no Supabase.
-
-
-Atualização v5.1:
-- Backend da IA já vem configurado no código: https://treino-100-api.vercel.app
-- APP_TOKEN já vem embutido para o usuário não precisar preencher.
-- Novas instalações começam sem dados pessoais preenchidos.
-- A área de IA no Perfil mostra apenas o toggle de relatório automático e botão de teste.
-
-Atenção: como o APP_TOKEN está no frontend, ele não deve ser tratado como segredo em uma versão pública/monetizada. Para produto real, o ideal é autenticar usuário no backend e validar permissões pelo Supabase.
+1. Abrir sem login e finalizar treino: deve salvar local.
+2. Criar conta/fazer login.
+3. Testar IA no Perfil.
+4. Finalizar treino logado: deve salvar local + nuvem + relatório IA.
+5. Colocar o celular em modo avião: deve aparecer aviso offline e salvar só local.

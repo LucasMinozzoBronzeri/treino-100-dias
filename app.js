@@ -1,7 +1,7 @@
 const STORAGE_KEY = 'treino100Pro.v1';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_BACKEND_URL = 'https://treino-100-api.vercel.app';
-const AI_APP_TOKEN = 'LcsTreino100_2026_x9Kp42';
+const AI_REQUIRES_LOGIN = true;
 const SUPABASE_URL = 'https://ppmlzpyxqtsgyhsyiuuh.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBwbWx6cHl4cXRzZ3loc3lpdXVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2NjkwMTEsImV4cCI6MjEwNzI0NTAxMX0.M_wDmwtVh2KkLmfbAIy0T76YeG379eW6QdW_OXfjO9c';
 let supabaseClient = null;
@@ -35,13 +35,13 @@ const DEFAULT_WORKOUTS = [
 ];
 function ex(id,name,type){return {id,name,type,target:'4x12'};}
 
-let state = load();
+let state = migrateState(load());
 let screen = 'home';
 let activeModalWorkout = null;
 
 function defaultState(){
   const initialProfile = newProfile('');
-  return { activeProfileId: initialProfile.id, profiles: [initialProfile], version: 2 };
+  return { activeProfileId: initialProfile.id, profiles: [initialProfile], version: 3, onboardingDone: false, entryMode: null };
 }
 function newProfile(name='Novo perfil'){
   return {
@@ -51,13 +51,23 @@ function newProfile(name='Novo perfil'){
   };
 }
 function load(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultState(); } catch { return defaultState(); } }
+function hasMeaningfulProfileData(p){
+  if(!p) return false;
+  return !!(String(p.name||'').trim() || String(p.goal||'').trim() || (p.history&&p.history.length) || (p.progress&&p.progress>0) || (p.checkins&&p.checkins.length) || (p.bio&&p.bio.length));
+}
+function migrateState(s){
+  if(!s || !Array.isArray(s.profiles)) s = defaultState();
+  if(typeof s.onboardingDone !== 'boolean') s.onboardingDone = s.profiles.some(hasMeaningfulProfileData);
+  if(!('entryMode' in s)) s.entryMode = s.onboardingDone ? 'local' : null;
+  if(!s.version || s.version < 3) s.version = 3;
+  return s;
+}
 function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 function profile(){ const p = state.profiles.find(p=>p.id===state.activeProfileId) || state.profiles[0]; return ensureProfile(p); }
 function ensureProfile(p){
   if(!p) return p;
   if(!p.ai) p.ai={autoWorkoutReport:true};
   p.ai.apiUrl = AI_BACKEND_URL;
-  p.ai.appToken = AI_APP_TOKEN;
   if(typeof p.ai.autoWorkoutReport !== 'boolean') p.ai.autoWorkoutReport = true;
   if(!Array.isArray(p.history)) p.history=[];
   if(!Array.isArray(p.checkins)) p.checkins=[];
@@ -106,13 +116,34 @@ async function getCurrentCloudUser(){
   if(cloudUser) return cloudUser;
   return await refreshCloudUser(false);
 }
+function isLocalMode(){ return state.entryMode === 'local'; }
+function isAnonymousCloudUser(){ return !!(cloudUser?.is_anonymous || cloudUser?.app_metadata?.provider === 'anonymous' || isLocalMode()); }
+function hasCloudAccount(){ return !!(cloudUser && !isAnonymousCloudUser() && state.entryMode === 'account'); }
 function cloudStatusHTML(){
   if(!cloudReady) return '<span class="badge red">indisponível</span>';
-  if(cloudUser) return '<span class="badge green">conectado</span>';
+  if(hasCloudAccount()) return '<span class="badge green">conectado</span>';
+  if(isLocalMode()) return '<span class="badge yellow">modo local</span>';
   return '<span class="badge yellow">desconectado</span>';
+}
+function isOffline(){ return !navigator.onLine; }
+function canUseOnlineAI(){ return !!(AI_BACKEND_URL && !isOffline() && cloudUser); }
+function shouldShowOnboarding(){
+  const p = profile();
+  return !state.onboardingDone && !hasMeaningfulProfileData(p) && !cloudUser;
+}
+function onlineNoticeHTML(){
+  if(isOffline()) return '<section class="offline-banner"><b>Modo offline</b><span>Você pode treinar normalmente, mas nuvem e IA ficam pausadas. Quando a internet voltar, use Sincronizar histórico.</span></section>';
+  return '';
+}
+async function getCloudAccessToken(){
+  if(!supabaseClient) return '';
+  const { data } = await supabaseClient.auth.getSession();
+  return data?.session?.access_token || '';
 }
 function init(){
   setupSupabase();
+  window.addEventListener('online', () => { toast('Você voltou para o modo online.'); render(); });
+  window.addEventListener('offline', () => { toast('Modo offline: treino salvo só neste aparelho.'); render(); });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.addEventListener('click',()=>setScreen(btn.dataset.screen)));
   byId('openProfileSwitcher').addEventListener('click', openProfileSwitcher);
@@ -122,13 +153,180 @@ function setScreen(s){ screen=s; render(); }
 function titleFor(s){ return {home:'Início',workouts:'Treinos',progress:'Progresso',checkin:'Check-in',coach:'Análise',profile:'Perfil'}[s] || 'Início'; }
 function render(){
   const p = profile();
+  if(shouldShowOnboarding()){
+    document.body.classList.add('onboarding-active');
+    byId('screenTitle').textContent = 'Bem-vindo';
+    byId('activeProfileName').textContent = 'Começar';
+    byId('profileInitial').textContent = '+';
+    document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+    byId('content').innerHTML = onlineNoticeHTML() + renderOnboarding();
+    bindOnboarding();
+    return;
+  }
+  document.body.classList.remove('onboarding-active');
   byId('screenTitle').textContent = titleFor(screen);
-  byId('activeProfileName').textContent = p.name || 'Perfil';
+  byId('activeProfileName').textContent = p.name || (isLocalMode() ? 'Modo local' : 'Perfil');
   byId('profileInitial').textContent = (p.name||'?').trim().charAt(0).toUpperCase();
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.screen===screen));
   const map = {home:renderHome, workouts:renderWorkouts, progress:renderProgress, checkin:renderCheckin, coach:renderCoach, profile:renderProfile};
-  byId('content').innerHTML = map[screen]();
+  byId('content').innerHTML = onlineNoticeHTML() + map[screen]();
   bindScreen();
+}
+
+function renderOnboarding(){
+  return `<section class="welcome-hero">
+    <div class="welcome-copy">
+      <p class="eyebrow">Treino 100 Dias Pro</p>
+      <h2>Comece do jeito certo</h2>
+      <p>Crie uma conta para salvar na nuvem ou entre em modo local para testar no aparelho. A IA funciona nos dois modos enquanto o projeto estiver liberado.</p>
+      <div class="mini-status"><span>${cloudStatusHTML()}</span><span>${isOffline()?'offline':'online'}</span></div>
+    </div>
+  </section>
+  <section class="onboarding-grid">
+    <div class="card onboarding-card">
+      <div class="card-title"><div><h3>Já tenho conta</h3><p>Entrar e sincronizar seus dados.</p></div></div>
+      <div class="form-grid single">
+        <div class="field"><label>E-mail</label><input class="input" id="loginEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div>
+        <div class="field"><label>Senha</label><input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="sua senha"></div>
+      </div>
+      <div class="actions"><button class="btn full" data-onboarding="login">Entrar</button></div>
+    </div>
+
+    <div class="card onboarding-card featured">
+      <div class="card-title"><div><h3>Criar conta</h3><p>Perfil completo + nuvem + IA.</p></div><span class="badge green">Recomendado</span></div>
+      ${onboardingProfileFields('signup')}
+      <div class="form-grid">
+        <div class="field"><label>E-mail</label><input class="input" id="signupEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div>
+        <div class="field"><label>Senha</label><input class="input" id="signupPassword" type="password" autocomplete="new-password" placeholder="mínimo 6 caracteres"></div>
+      </div>
+      <p class="form-error hidden" id="signupError"></p>
+      <div class="actions"><button class="btn full" data-onboarding="signup">Criar conta</button></div>
+    </div>
+
+    <div class="card onboarding-card">
+      <div class="card-title"><div><h3>Entrar localmente</h3><p>Usar sem conta. Treinos ficam neste aparelho.</p></div></div>
+      ${onboardingProfileFields('local')}
+      <p class="form-error hidden" id="localError"></p>
+      <div class="actions"><button class="btn secondary full" data-onboarding="local">Usar modo local</button></div>
+      <p class="muted">No modo local, a IA usa uma sessão anônima do Supabase. Se limpar os dados do navegador, o acesso local e histórico podem ser perdidos.</p>
+    </div>
+  </section>`;
+}
+function onboardingProfileFields(prefix){
+  return `<div class="form-grid">
+    <div class="field"><label>Nome</label><input class="input" id="${prefix}Name" placeholder="Seu nome"></div>
+    <div class="field"><label>Idade</label><input class="input" id="${prefix}Age" type="number" min="12" max="99" placeholder="ex: 21"></div>
+    <div class="field"><label>Altura</label><input class="input" id="${prefix}Height" inputmode="decimal" placeholder="ex: 1,88"></div>
+    <div class="field"><label>Peso inicial</label><input class="input" id="${prefix}Weight" inputmode="decimal" placeholder="ex: 83,2"></div>
+    <div class="field" style="grid-column:1/-1"><label>Objetivo</label><input class="input" id="${prefix}Goal" placeholder="ex: ganhar massa e secar"></div>
+  </div>`;
+}
+function bindOnboarding(){
+  document.querySelectorAll('[data-onboarding]').forEach(btn=>btn.onclick=()=>handleOnboarding(btn.dataset.onboarding));
+}
+function handleOnboarding(action){
+  if(action==='login') return onboardingLogin();
+  if(action==='signup') return onboardingSignup();
+  if(action==='local') return onboardingLocal();
+}
+
+
+function readOnboardingProfile(prefix){
+  return {
+    name: byId(prefix+'Name')?.value?.trim() || '',
+    age: byId(prefix+'Age')?.value?.trim() || '',
+    height: byId(prefix+'Height')?.value?.trim() || '',
+    weight: byId(prefix+'Weight')?.value?.trim() || '',
+    goal: byId(prefix+'Goal')?.value?.trim() || ''
+  };
+}
+function showFormError(id, message){
+  const el=byId(id);
+  if(!el){ toast(message); return; }
+  el.textContent=message;
+  el.classList.remove('hidden');
+}
+function validateProfileInfo(info){
+  if(!info.name || info.name.length < 2) return 'Informe um nome com pelo menos 2 letras.';
+  const age=Number(info.age);
+  if(!Number.isFinite(age) || age < 12 || age > 99) return 'Informe uma idade válida.';
+  const height=parseNumberValue(info.height);
+  if(!height || height < 1 || height > 2.5) return 'Informe uma altura válida. Exemplo: 1,88.';
+  const weight=parseNumberValue(info.weight);
+  if(!weight || weight < 30 || weight > 300) return 'Informe um peso inicial válido.';
+  if(!info.goal || info.goal.length < 3) return 'Informe seu objetivo.';
+  return '';
+}
+function applyProfileInfo(info){
+  const p=profile();
+  p.name=info.name;
+  p.age=info.age;
+  p.height=info.height;
+  p.weight=info.weight;
+  p.goal=info.goal;
+  ensureProfile(p);
+  save();
+}
+async function onboardingLogin(){
+  if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
+  if(isOffline()) return toast('Você está offline. Faça login quando estiver online.');
+  const email=byId('loginEmail')?.value?.trim();
+  const password=byId('loginPassword')?.value || '';
+  if(!email || !password) return toast('Informe e-mail e senha.');
+  const { data, error } = await supabaseClient.auth.signInWithPassword({email,password});
+  if(error) return toast('Erro no login: '+error.message);
+  cloudUser=data?.user || null;
+  state.onboardingDone=true;
+  state.entryMode='account';
+  save();
+  screen='home';
+  toast('Login realizado.');
+  render();
+}
+async function onboardingSignup(){
+  if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
+  if(isOffline()) return toast('Você está offline. Crie a conta quando estiver online.');
+  const info=readOnboardingProfile('signup');
+  const msg=validateProfileInfo(info);
+  if(msg) return showFormError('signupError', msg);
+  const email=byId('signupEmail')?.value?.trim();
+  const password=byId('signupPassword')?.value || '';
+  if(!email || !email.includes('@')) return showFormError('signupError', 'Informe um e-mail válido.');
+  if(!password || password.length < 6) return showFormError('signupError', 'A senha precisa ter pelo menos 6 caracteres.');
+  applyProfileInfo(info);
+  const { data, error } = await supabaseClient.auth.signUp({email,password, options:{data:{display_name:info.name}}});
+  if(error) return showFormError('signupError', 'Erro ao criar conta: '+error.message);
+  cloudUser=data?.user || null;
+  state.onboardingDone=true;
+  state.entryMode='account';
+  save();
+  if(cloudUser) await upsertCloudProfile(info.name);
+  screen='home';
+  toast(data?.session ? 'Conta criada e conectada.' : 'Conta criada. Confirme seu e-mail se o Supabase pedir.');
+  render();
+}
+async function onboardingLocal(){
+  const info=readOnboardingProfile('local');
+  const msg=validateProfileInfo(info);
+  if(msg) return showFormError('localError', msg);
+  applyProfileInfo(info);
+  state.onboardingDone=true;
+  state.entryMode='local';
+  save();
+  if(supabaseClient && !isOffline()){
+    try{
+      const { data, error } = await supabaseClient.auth.signInAnonymously({options:{data:{display_name:info.name, entry_mode:'local'}}});
+      if(error) throw error;
+      cloudUser=data?.user || null;
+      toast('Modo local ativado com IA online.');
+    }catch(e){
+      toast('Modo local ativado. IA online precisa de login anônimo habilitado no Supabase.');
+    }
+  }else{
+    toast('Modo local ativado. IA fica pausada enquanto estiver offline.');
+  }
+  screen='home';
+  render();
 }
 
 function renderHome(){
@@ -195,9 +393,9 @@ function renderCheckin(){
 }
 
 function renderCoach(){
-  const p=profile(); const insights=generateInsights(p); const aiOn=aiConfigured(p); const reports=p.history.filter(h=>h.aiReport || h.aiReportStatus || h.aiReportError).slice(-5).reverse();
-  return `<section class="hero"><p class="eyebrow">Coach</p><h2>Análise inteligente</h2><p>${aiOn?'IA online configurada. Ao finalizar treino, o app pode gerar um relatório automático.':'Hoje o app usa análise local. Configure a Vercel/API no Perfil para ativar IA online.'}</p><div class="actions"><button class="btn secondary" data-screen-go="profile">Configurar IA</button></div></section>
-  <section class="card"><div class="card-title"><h3>Status da IA</h3><span class="badge ${aiOn?'green':'yellow'}">${aiOn?'Online pronta':'Local/offline'}</span></div><p class="muted">Relatório automático ao finalizar treino: <strong>${p.ai?.autoWorkoutReport?'ativado':'desativado'}</strong></p></section>
+  const p=profile(); const insights=generateInsights(p); const aiOn=canUseOnlineAI(); const reports=p.history.filter(h=>h.aiReport || h.aiReportStatus || h.aiReportError).slice(-5).reverse();
+  return `<section class="hero"><p class="eyebrow">Coach</p><h2>Análise inteligente</h2><p>${aiOn?'IA online pronta. Ao finalizar treino, o app pode gerar um relatório automático.':(isOffline()?'Você está offline. A análise local funciona, mas IA e nuvem ficam pausadas.':'Entre na conta ou use modo local para liberar a IA online.')}</p><div class="actions"><button class="btn secondary" data-screen-go="profile">Configurar IA</button></div></section>
+  <section class="card"><div class="card-title"><h3>Status da IA</h3><span class="badge ${aiOn?'green':'yellow'}">${aiOn?'Online pronta':(isOffline()?'Offline':'Login necessário')}</span></div><p class="muted">Relatório automático ao finalizar treino: <strong>${p.ai?.autoWorkoutReport?'ativado':'desativado'}</strong></p></section>
   <section class="grid">${insights.map(i=>`<div class="alert ${i.type==='orange'?'orange':''}"><div>${i.icon}</div><div><strong>${esc(i.title)}</strong><p>${esc(i.text)}</p></div></div>`).join('')}</section>
   <section class="card"><div class="card-title"><h3>Últimos relatórios da IA</h3><p>Gerados ao finalizar treino</p></div>${reports.length?reports.map(h=>aiHistoryHTML(h)).join(''):'<div class="empty">Nenhum relatório de IA salvo ainda.</div>'}</section>`;
 }
@@ -229,18 +427,22 @@ function renderProfile(){ const p=profile(); const ai=p.ai||{}; return `<section
   ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}
   <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div></div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button><button class="btn secondary" data-action="new-profile">Novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
   <section class="card"><div class="card-title"><div><h3>Conta e sincronização</h3><p>Sem login o app continua funcionando só neste aparelho. Com login, salva também no Supabase.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}</section>
-  <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Backend já configurado no app. O usuário não precisa preencher URL nem token.</p></div><span class="badge green">Pronta</span></div><div class="form-grid">
+  <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Backend configurado no app. Para gerar relatório, o usuário precisa estar logado e online.</p></div><span class="badge green">Pronta</span></div><div class="form-grid">
     <label class="toggle-row" style="grid-column:1/-1"><input type="checkbox" data-ai-field="autoWorkoutReport" ${ai.autoWorkoutReport?'checked':''}> <span>Gerar relatório automaticamente ao finalizar treino</span></label>
-  </div><div class="actions"><button class="btn" data-action="save-profile">Salvar configuração</button><button class="btn secondary" data-action="test-ai">Testar IA</button></div><p class="muted">A chave da IA não fica no app; a chamada passa pelo backend Vercel.</p></section>
+  </div><div class="actions"><button class="btn" data-action="save-profile">Salvar configuração</button><button class="btn secondary" data-action="test-ai">Testar IA</button></div><p class="muted">Versão correta: não usa APP_TOKEN fixo no frontend. A Vercel valida o login Supabase antes de chamar a IA.</p></section>
   <section class="card"><div class="card-title"><h3>Perfis</h3><p>${state.profiles.length} perfil(is)</p></div><div class="profile-list">${state.profiles.map(x=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((x.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(x.name || 'Perfil')}</strong><div class="small">${x.progress}/${x.target} treinos</div></div></div><button class="btn sm ${x.id===state.activeProfileId?'green':'secondary'}" data-switch-profile="${x.id}">${x.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div></section>
   <section class="card"><div class="card-title"><h3>Zona perigosa</h3></div><button class="btn danger full" data-action="reset-profile">Resetar perfil ativo</button></section>`; }
 function renderCloudAccount(p){
   const synced = p.history.filter(h=>h.cloudSynced).length;
   const pending = p.history.filter(h=>!h.cloudSynced).length;
-  if(cloudUser){
+  if(hasCloudAccount()){
     return `<div class="cloud-panel"><p><b>Conta:</b> ${esc(cloudUser.email||'usuário conectado')}</p><p class="muted">Histórico local: ${p.history.length} treino(s) • Na nuvem: ${synced} • Pendentes: ${pending}</p><div class="actions"><button class="btn" data-action="cloud-sync">Sincronizar histórico com a nuvem</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button><button class="btn secondary" data-action="cloud-logout">Sair</button></div></div>`;
   }
-  return `<div class="form-grid"><div class="field" style="grid-column:1/-1"><label>Nome para criar conta</label><input class="input" id="cloudName" value="${esc(p.name||'')}"></div><div class="field"><label>E-mail</label><input class="input" id="cloudEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div><div class="field"><label>Senha</label><input class="input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="mínimo 6 caracteres"></div></div><div class="actions"><button class="btn" data-action="cloud-login">Entrar</button><button class="btn secondary" data-action="cloud-signup">Criar conta</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div><p class="muted">Ao criar conta, talvez o Supabase peça confirmação por e-mail. O app sem login continua funcionando normalmente.</p>`;
+  const upgradeForm = `<div class="form-grid"><div class="field" style="grid-column:1/-1"><label>Nome para criar conta</label><input class="input" id="cloudName" value="${esc(p.name||'')}"></div><div class="field"><label>E-mail</label><input class="input" id="cloudEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div><div class="field"><label>Senha</label><input class="input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="mínimo 6 caracteres"></div></div><div class="actions"><button class="btn" data-action="cloud-login">Entrar</button><button class="btn secondary" data-action="cloud-signup">Criar conta</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div>`;
+  if(isLocalMode()){
+    return `<div class="cloud-panel"><p><b>Modo local ativo.</b></p><p class="muted">Seus treinos ficam neste aparelho. A IA online usa uma sessão anônima do Supabase quando houver internet. Para sincronizar na nuvem e recuperar em outro dispositivo, crie uma conta.</p><div class="actions"><button class="btn secondary" data-action="cloud-refresh">Atualizar IA/local</button></div></div><div class="divider"></div>${upgradeForm}`;
+  }
+  return `${upgradeForm}<p class="muted">Ao criar conta, talvez o Supabase peça confirmação por e-mail. O app sem login continua funcionando normalmente. Se estiver offline, o login e a nuvem ficam indisponíveis.</p>`;
 }
 function inputHTML(id,label,val,type='text'){ return `<div class="field"><label>${label}</label><input class="input" type="${type}" data-profile-field="${id}" value="${esc(val)}"></div>`; }
 
@@ -265,7 +467,7 @@ function handleAction(a){
   if(a==='cloud-signup') cloudSignup();
   if(a==='cloud-logout') cloudLogout();
   if(a==='cloud-sync') syncLocalHistoryToCloud();
-  if(a==='cloud-refresh') refreshCloudUser(true).then(()=>toast(cloudUser?'Conta conectada.':'Sem login ativo.'));
+  if(a==='cloud-refresh') refreshLocalOrCloudStatus();
 }
 
 
@@ -377,10 +579,12 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
   const weights={}, status={}, metaSnap={}; w.exercises.forEach(e=>{ if(p.weights[e.id]) weights[e.id]=p.weights[e.id]; if(p.tempStatus[e.id]) status[e.id]=p.tempStatus[e.id]; if(p.exerciseMeta[e.id]) metaSnap[e.id]={...p.exerciseMeta[e.id]}; });
   const score = Math.max(0, Math.round(((doneCount + skippedCount*.35) / w.exercises.length) * 100));
   const record = {id:'h_'+Date.now(), date:nowISO(), workoutId:id, workoutName:w.name, doneCount, skippedCount, score, weights, status, meta:metaSnap};
-  if(aiConfigured(p) && p.ai.autoWorkoutReport) record.aiReportStatus='pending';
+  if(aiConfigured(p) && p.ai.autoWorkoutReport && canUseOnlineAI()) record.aiReportStatus='pending';
+  else if(p.ai.autoWorkoutReport && isOffline()) record.aiReportError='IA pausada: você estava offline.';
+  else if(p.ai.autoWorkoutReport && !cloudUser) record.aiReportError='IA pausada: entre na conta para gerar relatório.';
   p.history.push(record);
   p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={};
-  save(); closeModal(); toast(record.aiReportStatus==='pending' ? 'Treino finalizado. Gerando relatório com IA...' : 'Treino finalizado com sucesso.');
+  save(); closeModal(); toast(record.aiReportStatus==='pending' ? 'Treino finalizado. Gerando relatório com IA...' : (isOffline() ? 'Treino salvo offline neste aparelho.' : 'Treino finalizado com sucesso.'));
   if(record.aiReportStatus==='pending') generateWorkoutAIReport(p.id, record.id);
   else saveWorkoutToCloud(p, record, {silent:true});
 
@@ -433,9 +637,12 @@ async function generateWorkoutAIReport(profileId, historyId){
   const h=p.history.find(x=>x.id===historyId);
   if(!h) return;
   try{
+    if(isOffline()) throw new Error('Você está offline.');
+    const accessToken = await getCloudAccessToken();
+    if(!accessToken) throw new Error('Entre na conta para usar a IA online.');
     const response=await fetch(aiUrl(p),{
       method:'POST',
-      headers:{'Content-Type':'application/json', ...(AI_APP_TOKEN?{'x-app-token':AI_APP_TOKEN}:{})},
+      headers:{'Content-Type':'application/json', 'Authorization': `Bearer ${accessToken}`},
       body:JSON.stringify(buildWorkoutAIPayload(p,h))
     });
     const data=await response.json().catch(()=>({}));
@@ -451,6 +658,21 @@ async function generateWorkoutAIReport(profileId, historyId){
   }
 }
 
+
+async function refreshLocalOrCloudStatus(){
+  await refreshCloudUser(false);
+  if(isLocalMode() && !cloudUser && supabaseClient && !isOffline()){
+    try{
+      const p=profile();
+      const { data, error } = await supabaseClient.auth.signInAnonymously({options:{data:{display_name:p.name||'Usuário', entry_mode:'local'}}});
+      if(error) throw error;
+      cloudUser=data?.user || null;
+    }catch(e){}
+  }
+  render();
+  toast(cloudUser ? (isLocalMode()?'Modo local com IA pronto.':'Conta conectada.') : 'Sem sessão online ativa.');
+}
+
 async function cloudLogin(){
   if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
   const email=byId('cloudEmail')?.value?.trim();
@@ -459,6 +681,7 @@ async function cloudLogin(){
   const { data, error } = await supabaseClient.auth.signInWithPassword({email,password});
   if(error) return toast('Erro no login: '+error.message);
   cloudUser=data?.user || null;
+  state.onboardingDone=true; state.entryMode='account'; save();
   toast('Login realizado.'); render();
 }
 async function cloudSignup(){
@@ -467,10 +690,13 @@ async function cloudSignup(){
   const name=byId('cloudName')?.value?.trim() || p.name || 'Usuário';
   const email=byId('cloudEmail')?.value?.trim();
   const password=byId('cloudPassword')?.value || '';
-  if(!email || !password) return toast('Informe e-mail e senha.');
-  const { data, error } = await supabaseClient.auth.signUp({email,password});
+  if(!email || !email.includes('@')) return toast('Informe um e-mail válido.');
+  if(!password || password.length < 6) return toast('A senha precisa ter pelo menos 6 caracteres.');
+  p.name=name; ensureProfile(p); save();
+  const { data, error } = await supabaseClient.auth.signUp({email,password, options:{data:{display_name:name}}});
   if(error) return toast('Erro ao criar conta: '+error.message);
   cloudUser=data?.user || null;
+  state.onboardingDone=true; state.entryMode='account'; save();
   if(cloudUser){ await upsertCloudProfile(name); toast('Conta criada e conectada.'); }
   else toast('Conta criada. Verifique seu e-mail para confirmar.');
   render();
@@ -484,7 +710,8 @@ async function cloudLogout(){
 async function upsertCloudProfile(name){
   const user=await getCurrentCloudUser();
   if(!user) return;
-  await supabaseClient.from('profiles').upsert({id:user.id, name:name || profile().name || 'Usuário'});
+  const p=profile();
+  await supabaseClient.from('profiles').upsert({id:user.id, name:name || p.name || 'Usuário', age:parseNumberValue(p.age), height:parseNumberValue(p.height), initial_weight:parseNumberValue(p.weight), goal:p.goal || null, focus:p.focus || null});
 }
 function reportToText(report){
   if(!report) return '';
@@ -506,6 +733,7 @@ async function saveWorkoutToCloud(p, h, opts={}){
   if(!supabaseClient) return {ok:false, reason:'supabase_not_ready'};
   const user=await getCurrentCloudUser();
   if(!user) return {ok:false, reason:'not_logged_in'};
+  if(isLocalMode() || isAnonymousCloudUser()) return {ok:false, reason:'local_mode'};
   try{
     await upsertCloudProfile(p.name);
     let cloudId=h.cloudWorkoutId || null;
@@ -572,7 +800,7 @@ async function saveWorkoutToCloud(p, h, opts={}){
 async function syncLocalHistoryToCloud(){
   const p=profile();
   const user=await getCurrentCloudUser();
-  if(!user) return toast('Entre na conta para sincronizar.');
+  if(!user || !hasCloudAccount()) return toast('Crie uma conta ou entre para sincronizar na nuvem.');
   let sent=0, skipped=0, failed=0;
   for(const h of p.history){
     if(h.cloudSynced && (!h.aiReport || h.cloudReportSynced)){ skipped++; continue; }
@@ -585,12 +813,14 @@ async function syncLocalHistoryToCloud(){
 async function testAIConnection(){
   saveProfileForm();
   const p=profile();
-  if(!aiConfigured(p)) return toast('Informe a URL da Vercel primeiro.');
-  const fake={id:'test_'+Date.now(),date:nowISO(),workoutId:'TESTE',workoutName:'Teste de conexão',score:100,doneCount:1,skippedCount:0,weights:{},status:{},meta:{}};
+  if(!aiConfigured(p)) return toast('Backend da IA não configurado.');
+  if(isOffline()) return toast('Você está offline. IA indisponível agora.');
+  const accessToken = await getCloudAccessToken();
+  if(!accessToken) return toast('Entre na conta ou use modo local para testar a IA.');
   try{
     const response=await fetch(aiUrl(p),{
       method:'POST',
-      headers:{'Content-Type':'application/json', ...(AI_APP_TOKEN?{'x-app-token':AI_APP_TOKEN}:{})},
+      headers:{'Content-Type':'application/json', 'Authorization': `Bearer ${accessToken}`},
       body:JSON.stringify({kind:'health-check', profile:{name:p.name, goal:p.goal}, workout:{id:'TESTE', name:'Teste'}, previousSameWorkout:[]})
     });
     const data=await response.json().catch(()=>({}));

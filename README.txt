@@ -40,7 +40,7 @@ Esta versão está pronta para gerar relatório automático ao finalizar treino 
 Não coloque a OPENAI_API_KEY no app.js.
 No app, vá em Perfil > IA online via Vercel e preencha:
 - URL do backend Vercel, exemplo: https://treino-100-api.vercel.app
-- APP_TOKEN: o mesmo configurado na Vercel
+- Esta versão não usa login Supabase no frontend; a IA exige login Supabase válido.
 - Marque gerar relatório automaticamente ao finalizar treino.
 
 O backend deve expor /api/workout-report e usar OPENAI_API_KEY como variável de ambiente.

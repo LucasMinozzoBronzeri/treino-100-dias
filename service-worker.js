@@ -1,4 +1,4 @@
-const CACHE_NAME = 'treino-100-pro-v5-1-supabase-fixed-ai-clean';
+const CACHE_NAME = 'treino-100-pro-v5-3-onboarding-local-ai';
 const ASSETS = [
   './',
   './index.html',
