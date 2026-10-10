@@ -1,5 +1,10 @@
 const STORAGE_KEY = 'treino100Pro.v1';
 const AI_ENDPOINT_PATH = '/api/workout-report';
+const SUPABASE_URL = 'https://ppmlzpyxqtsgyhsyiuuh.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBwbWx6cHl4cXRzZ3loc3lpdXVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2NjkwMTEsImV4cCI6MjEwNzI0NTAxMX0.M_wDmwtVh2KkLmfbAIy0T76YeG379eW6QdW_OXfjO9c';
+let supabaseClient = null;
+let cloudUser = null;
+let cloudReady = false;
 
 const DEFAULT_WORKOUTS = [
   { id:'A', name:'Peito + Bíceps', focus:'Parte superior', exercises:[
@@ -66,7 +71,46 @@ function workoutById(p,id){ return p.workouts.find(w=>w.id===id); }
 function currentWorkout(p=profile()){ return workoutById(p, p.queue[0]); }
 function allExercises(p=profile()){ return p.workouts.flatMap(w=>w.exercises.map(e=>({...e, workoutId:w.id, workoutName:w.name}))); }
 
+
+function normalizeSupabaseUrl(url){
+  return String(url||'').replace(/\/rest\/v1\/?$/,'').replace(/\/+$/,'');
+}
+function setupSupabase(){
+  try{
+    if(window.supabase && SUPABASE_URL && SUPABASE_ANON_KEY){
+      supabaseClient = window.supabase.createClient(normalizeSupabaseUrl(SUPABASE_URL), SUPABASE_ANON_KEY);
+      cloudReady = true;
+      refreshCloudUser(false);
+      supabaseClient.auth.onAuthStateChange((_event, session)=>{
+        cloudUser = session?.user || null;
+        render();
+      });
+    }
+  }catch(e){
+    console.warn('Supabase indisponível:', e);
+    cloudReady = false;
+  }
+}
+async function refreshCloudUser(shouldRender=true){
+  if(!supabaseClient) return null;
+  try{
+    const { data } = await supabaseClient.auth.getUser();
+    cloudUser = data?.user || null;
+  }catch(e){ cloudUser = null; }
+  if(shouldRender) render();
+  return cloudUser;
+}
+async function getCurrentCloudUser(){
+  if(cloudUser) return cloudUser;
+  return await refreshCloudUser(false);
+}
+function cloudStatusHTML(){
+  if(!cloudReady) return '<span class="badge red">indisponível</span>';
+  if(cloudUser) return '<span class="badge green">conectado</span>';
+  return '<span class="badge yellow">desconectado</span>';
+}
 function init(){
+  setupSupabase();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.addEventListener('click',()=>setScreen(btn.dataset.screen)));
   byId('openProfileSwitcher').addEventListener('click', openProfileSwitcher);
@@ -179,16 +223,25 @@ function historyRowHTML(h){
 }
 
 
-function renderProfile(){ const p=profile(); const ai=p.ai||{}; return `<section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais, sem login.</p></div><div class="form-grid">
+function renderProfile(){ const p=profile(); const ai=p.ai||{}; return `<section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais. Se entrar na conta, salva também na nuvem.</p></div><div class="form-grid">
   ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}
   <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div></div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button><button class="btn secondary" data-action="new-profile">Novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
-  <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Não cole a OpenAI API key aqui. Ela fica só na Vercel.</p></div><span class="badge ${aiConfigured(p)?'green':'yellow'}">${aiConfigured(p)?'Pronta':'Pendente'}</span></div><div class="form-grid">
+  <section class="card"><div class="card-title"><div><h3>Conta e sincronização</h3><p>Sem login o app continua funcionando só neste aparelho. Com login, salva também no Supabase.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}</section>
+  <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Não cole API key aqui. Ela fica só na Vercel.</p></div><span class="badge ${aiConfigured(p)?'green':'yellow'}">${aiConfigured(p)?'Pronta':'Pendente'}</span></div><div class="form-grid">
     <div class="field" style="grid-column:1/-1"><label>URL do backend Vercel</label><input class="input" data-ai-field="apiUrl" value="${esc(ai.apiUrl||'')}" placeholder="https://treino-100-api.vercel.app"></div>
     <div class="field" style="grid-column:1/-1"><label>APP_TOKEN</label><input class="input" data-ai-field="appToken" value="${esc(ai.appToken||'')}" placeholder="mesmo token configurado na Vercel"></div>
     <label class="toggle-row" style="grid-column:1/-1"><input type="checkbox" data-ai-field="autoWorkoutReport" ${ai.autoWorkoutReport?'checked':''}> <span>Gerar relatório automaticamente ao finalizar treino</span></label>
   </div><div class="actions"><button class="btn" data-action="save-profile">Salvar configuração</button><button class="btn secondary" data-action="test-ai">Testar IA</button></div><p class="muted">A URL pode ser a base da Vercel ou o endpoint completo /api/workout-report.</p></section>
   <section class="card"><div class="card-title"><h3>Perfis</h3><p>${state.profiles.length} perfil(is)</p></div><div class="profile-list">${state.profiles.map(x=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc(x.name.charAt(0).toUpperCase())}</div><div><strong>${esc(x.name)}</strong><div class="small">${x.progress}/${x.target} treinos</div></div></div><button class="btn sm ${x.id===state.activeProfileId?'green':'secondary'}" data-switch-profile="${x.id}">${x.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div></section>
   <section class="card"><div class="card-title"><h3>Zona perigosa</h3></div><button class="btn danger full" data-action="reset-profile">Resetar perfil ativo</button></section>`; }
+function renderCloudAccount(p){
+  const synced = p.history.filter(h=>h.cloudSynced).length;
+  const pending = p.history.filter(h=>!h.cloudSynced).length;
+  if(cloudUser){
+    return `<div class="cloud-panel"><p><b>Conta:</b> ${esc(cloudUser.email||'usuário conectado')}</p><p class="muted">Histórico local: ${p.history.length} treino(s) • Na nuvem: ${synced} • Pendentes: ${pending}</p><div class="actions"><button class="btn" data-action="cloud-sync">Sincronizar histórico com a nuvem</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button><button class="btn secondary" data-action="cloud-logout">Sair</button></div></div>`;
+  }
+  return `<div class="form-grid"><div class="field" style="grid-column:1/-1"><label>Nome para criar conta</label><input class="input" id="cloudName" value="${esc(p.name||'')}"></div><div class="field"><label>E-mail</label><input class="input" id="cloudEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div><div class="field"><label>Senha</label><input class="input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="mínimo 6 caracteres"></div></div><div class="actions"><button class="btn" data-action="cloud-login">Entrar</button><button class="btn secondary" data-action="cloud-signup">Criar conta</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div><p class="muted">Ao criar conta, talvez o Supabase peça confirmação por e-mail. O app sem login continua funcionando normalmente.</p>`;
+}
 function inputHTML(id,label,val,type='text'){ return `<div class="field"><label>${label}</label><input class="input" type="${type}" data-profile-field="${id}" value="${esc(val)}"></div>`; }
 
 function bindScreen(){
@@ -208,7 +261,13 @@ function handleAction(a){
   if(a==='new-bio') openBioModal();
   if(a==='edit-current-workout') openEditWorkout(currentWorkout().id);
   if(a==='test-ai') testAIConnection();
+  if(a==='cloud-login') cloudLogin();
+  if(a==='cloud-signup') cloudSignup();
+  if(a==='cloud-logout') cloudLogout();
+  if(a==='cloud-sync') syncLocalHistoryToCloud();
+  if(a==='cloud-refresh') refreshCloudUser(true).then(()=>toast(cloudUser?'Conta conectada.':'Sem login ativo.'));
 }
+
 
 function saveProfileForm(){
   const p=profile();
@@ -323,6 +382,7 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
   p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={};
   save(); closeModal(); toast(record.aiReportStatus==='pending' ? 'Treino finalizado. Gerando relatório com IA...' : 'Treino finalizado com sucesso.');
   if(record.aiReportStatus==='pending') generateWorkoutAIReport(p.id, record.id);
+  else saveWorkoutToCloud(p, record, {silent:true});
 
 }
 
@@ -383,12 +443,144 @@ async function generateWorkoutAIReport(profileId, historyId){
     h.aiReport=data.report || {title:'Relatório da IA', summary:data.text || 'Relatório gerado.'};
     h.aiReportStatus='done';
     h.aiReportError='';
-    save(); render(); toast('Relatório da IA salvo.');
+    save(); await saveWorkoutToCloud(p, h, {silent:true}); render(); toast('Relatório da IA salvo.');
   }catch(err){
     h.aiReportStatus='error';
     h.aiReportError=err.message || 'Erro desconhecido';
-    save(); render(); toast('Não consegui gerar o relatório da IA.');
+    save(); await saveWorkoutToCloud(p, h, {silent:true}); render(); toast('Não consegui gerar o relatório da IA.');
   }
+}
+
+async function cloudLogin(){
+  if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
+  const email=byId('cloudEmail')?.value?.trim();
+  const password=byId('cloudPassword')?.value || '';
+  if(!email || !password) return toast('Informe e-mail e senha.');
+  const { data, error } = await supabaseClient.auth.signInWithPassword({email,password});
+  if(error) return toast('Erro no login: '+error.message);
+  cloudUser=data?.user || null;
+  toast('Login realizado.'); render();
+}
+async function cloudSignup(){
+  if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
+  const p=profile();
+  const name=byId('cloudName')?.value?.trim() || p.name || 'Usuário';
+  const email=byId('cloudEmail')?.value?.trim();
+  const password=byId('cloudPassword')?.value || '';
+  if(!email || !password) return toast('Informe e-mail e senha.');
+  const { data, error } = await supabaseClient.auth.signUp({email,password});
+  if(error) return toast('Erro ao criar conta: '+error.message);
+  cloudUser=data?.user || null;
+  if(cloudUser){ await upsertCloudProfile(name); toast('Conta criada e conectada.'); }
+  else toast('Conta criada. Verifique seu e-mail para confirmar.');
+  render();
+}
+async function cloudLogout(){
+  if(!supabaseClient) return;
+  await supabaseClient.auth.signOut();
+  cloudUser=null;
+  toast('Você saiu da conta.'); render();
+}
+async function upsertCloudProfile(name){
+  const user=await getCurrentCloudUser();
+  if(!user) return;
+  await supabaseClient.from('profiles').upsert({id:user.id, name:name || profile().name || 'Usuário'});
+}
+function reportToText(report){
+  if(!report) return '';
+  if(typeof report==='string') return report;
+  const parts=[];
+  if(report.title) parts.push(report.title);
+  if(report.summary) parts.push(report.summary);
+  if(report.evolution) parts.push('Evolução: '+report.evolution);
+  if(report.attention) parts.push('Atenção: '+report.attention);
+  if(report.nextGoal) parts.push('Próxima meta: '+report.nextGoal);
+  return parts.join('\n\n') || JSON.stringify(report);
+}
+function parseNumberValue(v){
+  if(v===undefined || v===null || v==='') return null;
+  const n=parseFloat(String(v).replace(',', '.').replace(/[^0-9.\-]/g,''));
+  return Number.isFinite(n) ? n : null;
+}
+async function saveWorkoutToCloud(p, h, opts={}){
+  if(!supabaseClient) return {ok:false, reason:'supabase_not_ready'};
+  const user=await getCurrentCloudUser();
+  if(!user) return {ok:false, reason:'not_logged_in'};
+  try{
+    await upsertCloudProfile(p.name);
+    let cloudId=h.cloudWorkoutId || null;
+    if(!cloudId){
+      const { data: existing } = await supabaseClient.from('workout_logs').select('id').eq('user_id', user.id).eq('local_id', h.id).maybeSingle();
+      cloudId = existing?.id || null;
+    }
+    if(!cloudId){
+      const { data, error } = await supabaseClient.from('workout_logs').insert({
+        user_id:user.id,
+        workout_key:h.workoutId || '',
+        workout_name:h.workoutName || '',
+        cycle_number:Math.floor((p.progress||0)/5),
+        finished_at:h.date || nowISO(),
+        notes:h.notes || null,
+        local_id:h.id || null
+      }).select().single();
+      if(error) throw error;
+      cloudId=data.id;
+      h.cloudWorkoutId=cloudId;
+      const w=workoutById(p,h.workoutId);
+      const rows=(w?.exercises||[]).map(e=>({
+        workout_log_id:cloudId,
+        user_id:user.id,
+        exercise_name:e.name || '',
+        exercise_type:e.type || null,
+        weight:parseNumberValue(h.weights?.[e.id]),
+        reps:parseNumberValue(h.meta?.[e.id]?.reps),
+        sets:parseNumberValue(h.meta?.[e.id]?.sets),
+        difficulty:h.meta?.[e.id]?.difficulty || null,
+        pain:h.meta?.[e.id]?.pain || null,
+        notes:h.meta?.[e.id]?.notes || null,
+        skipped:h.status?.[e.id]==='skipped',
+        completed:h.status?.[e.id]==='done'
+      }));
+      if(rows.length){
+        const { error: exError } = await supabaseClient.from('exercise_logs').insert(rows);
+        if(exError) console.warn('Erro ao salvar exercícios:', exError);
+      }
+    }
+    h.cloudSynced=true;
+    const reportText=reportToText(h.aiReport);
+    if(reportText && !h.cloudReportSynced){
+      const { error: repError } = await supabaseClient.from('ai_reports').insert({
+        user_id:user.id,
+        workout_log_id:cloudId,
+        report_type:'workout',
+        report_text:reportText,
+        provider:'gemini',
+        model:'gemini-3.5-flash-lite'
+      });
+      if(!repError) h.cloudReportSynced=true;
+      else console.warn('Erro ao salvar relatório IA:', repError);
+    }
+    save();
+    if(!opts.silent) toast('Treino salvo na nuvem.');
+    return {ok:true, id:cloudId};
+  }catch(e){
+    console.error('Erro Supabase:', e);
+    if(!opts.silent) toast('Erro ao salvar na nuvem: '+(e.message||'erro'));
+    return {ok:false, error:e};
+  }
+}
+async function syncLocalHistoryToCloud(){
+  const p=profile();
+  const user=await getCurrentCloudUser();
+  if(!user) return toast('Entre na conta para sincronizar.');
+  let sent=0, skipped=0, failed=0;
+  for(const h of p.history){
+    if(h.cloudSynced && (!h.aiReport || h.cloudReportSynced)){ skipped++; continue; }
+    const result=await saveWorkoutToCloud(p,h,{silent:true});
+    if(result.ok) sent++; else failed++;
+  }
+  save(); render();
+  toast(`Sincronização: ${sent} enviado(s), ${skipped} já estavam, ${failed} falha(s).`);
 }
 async function testAIConnection(){
   saveProfileForm();
