@@ -21,3 +21,12 @@ Teste recomendado:
 4. Testar sem login.
 5. Criar conta/login.
 6. Finalizar um treino e conferir tabelas workout_logs, exercise_logs e ai_reports no Supabase.
+
+
+Atualização v5.1:
+- Backend da IA já vem configurado no código: https://treino-100-api.vercel.app
+- APP_TOKEN já vem embutido para o usuário não precisar preencher.
+- Novas instalações começam sem dados pessoais preenchidos.
+- A área de IA no Perfil mostra apenas o toggle de relatório automático e botão de teste.
+
+Atenção: como o APP_TOKEN está no frontend, ele não deve ser tratado como segredo em uma versão pública/monetizada. Para produto real, o ideal é autenticar usuário no backend e validar permissões pelo Supabase.

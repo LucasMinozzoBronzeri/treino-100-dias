@@ -1,5 +1,7 @@
 const STORAGE_KEY = 'treino100Pro.v1';
 const AI_ENDPOINT_PATH = '/api/workout-report';
+const AI_BACKEND_URL = 'https://treino-100-api.vercel.app';
+const AI_APP_TOKEN = 'LcsTreino100_2026_x9Kp42';
 const SUPABASE_URL = 'https://ppmlzpyxqtsgyhsyiuuh.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBwbWx6cHl4cXRzZ3loc3lpdXVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2NjkwMTEsImV4cCI6MjEwNzI0NTAxMX0.M_wDmwtVh2KkLmfbAIy0T76YeG379eW6QdW_OXfjO9c';
 let supabaseClient = null;
@@ -38,16 +40,14 @@ let screen = 'home';
 let activeModalWorkout = null;
 
 function defaultState(){
-  const lucas = newProfile('Lucas');
-  lucas.height = '1,87'; lucas.weight = '83,2'; lucas.goal = 'Ganhar massa e dar uma secada'; lucas.focus = 'Parte superior';
-  lucas.notes = 'Pé chato; desconforto no leg press/hack; foco em ombro e costas.';
-  return { activeProfileId: lucas.id, profiles: [lucas], version: 1 };
+  const initialProfile = newProfile('');
+  return { activeProfileId: initialProfile.id, profiles: [initialProfile], version: 2 };
 }
 function newProfile(name='Novo perfil'){
   return {
     id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, age:'', height:'', weight:'', goal:'', focus:'', notes:'',
     queue: ['A','B','C','D','E'], progress: 0, target: 100, workouts: structuredClone(DEFAULT_WORKOUTS),
-    weights:{}, exerciseMeta:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], ai:{apiUrl:'', appToken:'', autoWorkoutReport:false}, createdAt: nowISO()
+    weights:{}, exerciseMeta:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], ai:{autoWorkoutReport:true}, createdAt: nowISO()
   };
 }
 function load(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultState(); } catch { return defaultState(); } }
@@ -55,8 +55,10 @@ function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 function profile(){ const p = state.profiles.find(p=>p.id===state.activeProfileId) || state.profiles[0]; return ensureProfile(p); }
 function ensureProfile(p){
   if(!p) return p;
-  if(!p.ai) p.ai={apiUrl:'', appToken:'', autoWorkoutReport:false};
-  if(typeof p.ai.autoWorkoutReport !== 'boolean') p.ai.autoWorkoutReport = !!p.ai.autoWorkoutReport;
+  if(!p.ai) p.ai={autoWorkoutReport:true};
+  p.ai.apiUrl = AI_BACKEND_URL;
+  p.ai.appToken = AI_APP_TOKEN;
+  if(typeof p.ai.autoWorkoutReport !== 'boolean') p.ai.autoWorkoutReport = true;
   if(!Array.isArray(p.history)) p.history=[];
   if(!Array.isArray(p.checkins)) p.checkins=[];
   if(!Array.isArray(p.bio)) p.bio=[];
@@ -121,7 +123,7 @@ function titleFor(s){ return {home:'Início',workouts:'Treinos',progress:'Progre
 function render(){
   const p = profile();
   byId('screenTitle').textContent = titleFor(screen);
-  byId('activeProfileName').textContent = p.name;
+  byId('activeProfileName').textContent = p.name || 'Perfil';
   byId('profileInitial').textContent = (p.name||'?').trim().charAt(0).toUpperCase();
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.screen===screen));
   const map = {home:renderHome, workouts:renderWorkouts, progress:renderProgress, checkin:renderCheckin, coach:renderCoach, profile:renderProfile};
@@ -137,7 +139,7 @@ function renderHome(){
       <div class="hero-row">
         <div>
           <p class="eyebrow">Perfil ativo</p>
-          <h2>${esc(p.name)}</h2>
+          <h2>${esc(p.name || 'Meu perfil')}</h2>
           <p>${esc(p.goal || 'Seu projeto de evolução em 100 treinos.')}</p>
           <div class="actions"><button class="btn" data-action="start-current">Iniciar ${w.id}</button><button class="btn secondary" data-screen-go="progress">Ver progresso</button></div>
         </div>
@@ -227,12 +229,10 @@ function renderProfile(){ const p=profile(); const ai=p.ai||{}; return `<section
   ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}
   <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div></div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button><button class="btn secondary" data-action="new-profile">Novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
   <section class="card"><div class="card-title"><div><h3>Conta e sincronização</h3><p>Sem login o app continua funcionando só neste aparelho. Com login, salva também no Supabase.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}</section>
-  <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Não cole API key aqui. Ela fica só na Vercel.</p></div><span class="badge ${aiConfigured(p)?'green':'yellow'}">${aiConfigured(p)?'Pronta':'Pendente'}</span></div><div class="form-grid">
-    <div class="field" style="grid-column:1/-1"><label>URL do backend Vercel</label><input class="input" data-ai-field="apiUrl" value="${esc(ai.apiUrl||'')}" placeholder="https://treino-100-api.vercel.app"></div>
-    <div class="field" style="grid-column:1/-1"><label>APP_TOKEN</label><input class="input" data-ai-field="appToken" value="${esc(ai.appToken||'')}" placeholder="mesmo token configurado na Vercel"></div>
+  <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Backend já configurado no app. O usuário não precisa preencher URL nem token.</p></div><span class="badge green">Pronta</span></div><div class="form-grid">
     <label class="toggle-row" style="grid-column:1/-1"><input type="checkbox" data-ai-field="autoWorkoutReport" ${ai.autoWorkoutReport?'checked':''}> <span>Gerar relatório automaticamente ao finalizar treino</span></label>
-  </div><div class="actions"><button class="btn" data-action="save-profile">Salvar configuração</button><button class="btn secondary" data-action="test-ai">Testar IA</button></div><p class="muted">A URL pode ser a base da Vercel ou o endpoint completo /api/workout-report.</p></section>
-  <section class="card"><div class="card-title"><h3>Perfis</h3><p>${state.profiles.length} perfil(is)</p></div><div class="profile-list">${state.profiles.map(x=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc(x.name.charAt(0).toUpperCase())}</div><div><strong>${esc(x.name)}</strong><div class="small">${x.progress}/${x.target} treinos</div></div></div><button class="btn sm ${x.id===state.activeProfileId?'green':'secondary'}" data-switch-profile="${x.id}">${x.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div></section>
+  </div><div class="actions"><button class="btn" data-action="save-profile">Salvar configuração</button><button class="btn secondary" data-action="test-ai">Testar IA</button></div><p class="muted">A chave da IA não fica no app; a chamada passa pelo backend Vercel.</p></section>
+  <section class="card"><div class="card-title"><h3>Perfis</h3><p>${state.profiles.length} perfil(is)</p></div><div class="profile-list">${state.profiles.map(x=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((x.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(x.name || 'Perfil')}</strong><div class="small">${x.progress}/${x.target} treinos</div></div></div><button class="btn sm ${x.id===state.activeProfileId?'green':'secondary'}" data-switch-profile="${x.id}">${x.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div></section>
   <section class="card"><div class="card-title"><h3>Zona perigosa</h3></div><button class="btn danger full" data-action="reset-profile">Resetar perfil ativo</button></section>`; }
 function renderCloudAccount(p){
   const synced = p.history.filter(h=>h.cloudSynced).length;
@@ -280,7 +280,7 @@ function saveProfileForm(){
   save(); toast('Perfil salvo.'); render();
 }
 function createProfileFlow(){ const name=prompt('Nome do novo perfil:'); if(!name) return; const p=newProfile(name); state.profiles.push(p); state.activeProfileId=p.id; save(); render(); toast('Perfil criado.'); }
-function resetProfileFlow(){ const p=profile(); if(!confirm(`Resetar TODO o perfil ${p.name}? Isso apaga treinos, cargas, histórico, check-ins e bioimpedância.`)) return; const t=prompt('Digite RESETAR para confirmar:'); if(t!=='RESETAR') return toast('Reset cancelado.'); const fresh=newProfile(p.name); fresh.id=p.id; state.profiles[state.profiles.findIndex(x=>x.id===p.id)] = fresh; save(); render(); toast('Perfil resetado.'); }
+function resetProfileFlow(){ const p=profile(); if(!confirm(`Resetar TODO o perfil ${p.name || 'Perfil'}? Isso apaga treinos, cargas, histórico, check-ins e bioimpedância.`)) return; const t=prompt('Digite RESETAR para confirmar:'); if(t!=='RESETAR') return toast('Reset cancelado.'); const fresh=newProfile(p.name); fresh.id=p.id; state.profiles[state.profiles.findIndex(x=>x.id===p.id)] = fresh; save(); render(); toast('Perfil resetado.'); }
 
 
 function exerciseHTML(p,w,e,isCurrent){
@@ -386,7 +386,7 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
 
 }
 
-function openProfileSwitcher(){ const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Perfil</p><h2>Quem está treinando?</h2></div><button class="close" data-close>×</button></div><div class="profile-list">${state.profiles.map(p=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc(p.name.charAt(0).toUpperCase())}</div><div><strong>${esc(p.name)}</strong><div class="small">${p.progress}/${p.target} treinos</div></div></div><button class="btn sm ${p.id===state.activeProfileId?'green':'secondary'}" data-modal-switch-profile="${p.id}">${p.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div><div class="actions"><button class="btn" data-modal-new-profile>Novo perfil</button></div></div>`; layer.classList.remove('hidden'); document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=()=>{state.activeProfileId=b.dataset.modalSwitchProfile; save(); closeModal();}); document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();}; }
+function openProfileSwitcher(){ const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Perfil</p><h2>Quem está treinando?</h2></div><button class="close" data-close>×</button></div><div class="profile-list">${state.profiles.map(p=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((p.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(p.name || 'Perfil')}</strong><div class="small">${p.progress}/${p.target} treinos</div></div></div><button class="btn sm ${p.id===state.activeProfileId?'green':'secondary'}" data-modal-switch-profile="${p.id}">${p.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div><div class="actions"><button class="btn" data-modal-new-profile>Novo perfil</button></div></div>`; layer.classList.remove('hidden'); document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=()=>{state.activeProfileId=b.dataset.modalSwitchProfile; save(); closeModal();}); document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();}; }
 
 function openCheckinModal(){ const p=profile(), cycle=Math.floor(p.progress/5); const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Check-in</p><h2>Ciclo ${cycle}</h2><p class="muted">Tente usar sempre a mesma luz, pose e distância.</p></div><button class="close" data-close>×</button></div><div class="form-grid">${inputPlain('checkWeight','Peso do dia')} ${inputPlain('checkWaist','Cintura')}<div class="field" style="grid-column:1/-1"><label>Observação do ciclo</label><textarea id="checkNotes"></textarea></div></div><div class="photo-grid"><label class="photo-box"><span>Frente<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="front" hidden></label><label class="photo-box"><span>Lado<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="side" hidden></label><label class="photo-box"><span>Costas<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="back" hidden></label></div><div class="actions"><button class="btn" data-save-checkin>Salvar check-in</button><button class="btn secondary" data-close>Cancelar</button></div></div>`; layer.classList.remove('hidden'); const photos={}; document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-photo]').forEach(inp=>inp.onchange=async()=>{ const img=await compressImage(inp.files[0]); photos[inp.dataset.photo]=img; inp.parentElement.innerHTML=`<img src="${img}" alt="foto ${inp.dataset.photo}">`; }); document.querySelector('[data-save-checkin]').onclick=()=>{ p.checkins.push({id:'c_'+Date.now(), date:nowISO(), cycle, weight:byId('checkWeight').value, waist:byId('checkWaist').value, notes:byId('checkNotes').value, photos}); save(); closeModal(); toast('Check-in salvo.'); }; }
 function inputPlain(id,label){ return `<div class="field"><label>${label}</label><input class="input" id="${id}"></div>`; }
@@ -398,10 +398,10 @@ function fillBioFromText(t){ const get=(re)=>{const m=t.match(re); return m?m[1]
 
 
 function aiConfigured(p=profile()){
-  return !!(p?.ai?.apiUrl && String(p.ai.apiUrl).trim());
+  return !!AI_BACKEND_URL;
 }
 function aiUrl(p=profile(), path=AI_ENDPOINT_PATH){
-  const base=String(p.ai?.apiUrl||'').trim().replace(/\/+$/,'');
+  const base=String(AI_BACKEND_URL||'').trim().replace(/\/+$/,'');
   if(!base) return '';
   if(base.endsWith(path)) return base;
   return base + path;
@@ -435,7 +435,7 @@ async function generateWorkoutAIReport(profileId, historyId){
   try{
     const response=await fetch(aiUrl(p),{
       method:'POST',
-      headers:{'Content-Type':'application/json', ...(p.ai.appToken?{'x-app-token':p.ai.appToken}:{})},
+      headers:{'Content-Type':'application/json', ...(AI_APP_TOKEN?{'x-app-token':AI_APP_TOKEN}:{})},
       body:JSON.stringify(buildWorkoutAIPayload(p,h))
     });
     const data=await response.json().catch(()=>({}));
@@ -590,7 +590,7 @@ async function testAIConnection(){
   try{
     const response=await fetch(aiUrl(p),{
       method:'POST',
-      headers:{'Content-Type':'application/json', ...(p.ai.appToken?{'x-app-token':p.ai.appToken}:{})},
+      headers:{'Content-Type':'application/json', ...(AI_APP_TOKEN?{'x-app-token':AI_APP_TOKEN}:{})},
       body:JSON.stringify({kind:'health-check', profile:{name:p.name, goal:p.goal}, workout:{id:'TESTE', name:'Teste'}, previousSameWorkout:[]})
     });
     const data=await response.json().catch(()=>({}));
