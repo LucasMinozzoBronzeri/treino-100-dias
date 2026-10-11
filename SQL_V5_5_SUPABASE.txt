@@ -1,0 +1,36 @@
+-- Gym Bronze v5.5 — campos novos e limite diário de IA
+
+-- Perfil: adiciona sexo, se ainda não existir
+alter table public.profiles
+  add column if not exists sex text;
+
+-- Controle de limite diário de requisições IA por usuário
+create table if not exists public.ai_usage_limits (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  usage_date date not null default current_date,
+  feature text not null,
+  count integer not null default 0,
+  last_used_at timestamptz default now(),
+  created_at timestamptz default now(),
+  unique(user_id, usage_date, feature)
+);
+
+alter table public.ai_usage_limits enable row level security;
+
+drop policy if exists "Users can view own ai usage" on public.ai_usage_limits;
+drop policy if exists "Users can insert own ai usage" on public.ai_usage_limits;
+drop policy if exists "Users can update own ai usage" on public.ai_usage_limits;
+
+create policy "Users can view own ai usage"
+on public.ai_usage_limits for select
+using (auth.uid() = user_id);
+
+create policy "Users can insert own ai usage"
+on public.ai_usage_limits for insert
+with check (auth.uid() = user_id);
+
+create policy "Users can update own ai usage"
+on public.ai_usage_limits for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);

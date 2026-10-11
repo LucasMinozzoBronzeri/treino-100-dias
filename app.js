@@ -1,6 +1,7 @@
 const STORAGE_KEY = 'gymBronze.v1';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
+const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
 const AI_BACKEND_URL = 'https://treino-100-api.vercel.app';
 const AI_REQUIRES_LOGIN = true;
 const SUPABASE_URL = 'https://ppmlzpyxqtsgyhsyiuuh.supabase.co';
@@ -178,7 +179,7 @@ function defaultState(){
 }
 function newProfile(name='Novo perfil'){
   const p = {
-    id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, age:'', height:'', weight:'', goal:'', focus:'', notes:'', experience:'Iniciante', daysPerWeek:'5',
+    id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, sex:'', age:'', height:'', weight:'', goal:'', focus:'', notes:'', experience:'Iniciante', daysPerWeek:'5', dietPlan:null,
     queue: [], progress: 0, target: 20, workouts: [], programWeeks:4, programLabel:'4 semanas • 20 treinos', planMeta:{source:'default', cycle:1, title:'Treino padrão'},
     weights:{}, exerciseMeta:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], ai:{autoWorkoutReport:true}, createdAt: nowISO()
   };
@@ -203,6 +204,8 @@ function ensureProfile(p){
   if(!p) return p;
   if(!p.ai) p.ai={autoWorkoutReport:true};
   if(!p.planMeta) p.planMeta={source:'default', cycle:1, title:'Treino padrão'};
+  if(!('sex' in p)) p.sex='';
+  if(!('dietPlan' in p)) p.dietPlan=null;
   if(!('experience' in p)) p.experience='';
   if(!('daysPerWeek' in p)) p.daysPerWeek='';
   applyProgramDuration(p);
@@ -366,6 +369,7 @@ function onboardingProfileFields(prefix){
   return `<div class="form-grid">
     <div class="field"><label>Nome</label><input class="input" id="${prefix}Name" placeholder="Seu nome"></div>
     <div class="field"><label>Idade</label><input class="input" id="${prefix}Age" type="number" min="12" max="99" placeholder="ex: 21"></div>
+    <div class="field"><label>Sexo</label><select class="select" id="${prefix}Sex"><option value="">Selecione</option><option value="Homem">Homem</option><option value="Mulher">Mulher</option><option value="Outro/Prefiro não informar">Outro/Prefiro não informar</option></select></div>
     <div class="field"><label>Altura</label><input class="input" id="${prefix}Height" inputmode="decimal" placeholder="ex: 1,88"></div>
     <div class="field"><label>Peso inicial</label><input class="input" id="${prefix}Weight" inputmode="decimal" placeholder="ex: 83,2"></div>
     <div class="field"><label>Objetivo</label><input class="input" id="${prefix}Goal" placeholder="ex: ganhar massa e secar"></div>
@@ -392,6 +396,7 @@ function readOnboardingProfile(prefix){
   return {
     name: byId(prefix+'Name')?.value?.trim() || '',
     age: byId(prefix+'Age')?.value?.trim() || '',
+    sex: byId(prefix+'Sex')?.value?.trim() || '',
     height: byId(prefix+'Height')?.value?.trim() || '',
     weight: byId(prefix+'Weight')?.value?.trim() || '',
     goal: byId(prefix+'Goal')?.value?.trim() || '',
@@ -411,6 +416,7 @@ function validateProfileInfo(info){
   if(!info.name || info.name.length < 2) return 'Informe um nome com pelo menos 2 letras.';
   const age=Number(info.age);
   if(!Number.isFinite(age) || age < 12 || age > 99) return 'Informe uma idade válida.';
+  if(!info.sex) return 'Informe o sexo para personalizar melhor o treino.';
   const height=parseNumberValue(info.height);
   if(!height || height < 1 || height > 2.5) return 'Informe uma altura válida. Exemplo: 1,88.';
   const weight=parseNumberValue(info.weight);
@@ -425,6 +431,7 @@ function applyProfileInfo(info, targetProfile=null){
   const p=targetProfile || profile();
   p.name=info.name;
   p.age=info.age;
+  p.sex=info.sex;
   p.height=info.height;
   p.weight=info.weight;
   p.goal=info.goal;
@@ -534,7 +541,7 @@ function renderHome(){
     <section class="card plan-card">
       <div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title || 'Treino padrão')} • ${esc(p.programLabel || programLabelForProfile(p))} • Ciclo ${p.planMeta?.cycle || Math.max(1, cycles+1)}</p></div><span class="badge ${p.planMeta?.source==='ai'?'green':'orange'}">${p.planMeta?.source==='ai'?'IA':'Padrão'}</span></div>
       <p class="muted">${esc(p.planMeta?.notes || 'Use os dados dos treinos para ajustar o próximo ciclo com IA.')}</p>
-      <div class="actions"><button class="btn sm secondary" data-action="generate-initial-plan">Gerar/atualizar treino com IA</button><button class="btn sm ${p.progress>=workoutsPerCycle(p)?'':'secondary'}" ${p.progress>=workoutsPerCycle(p)?'':'disabled'} data-action="finish-cycle-ai">Finalizar ciclo e ajustar treino</button></div>
+      <div class="actions"><button class="btn sm secondary" data-action="generate-initial-plan">Criar treino inteligente</button><button class="btn sm ${p.progress>=workoutsPerCycle(p)?'':'secondary'}" ${p.progress>=workoutsPerCycle(p)?'':'disabled'} data-action="finish-cycle-ai">Revisar próximo ciclo</button></div>
     </section>
     <section class="card">
       <div class="card-title"><h3>Próximo treino</h3><span class="badge orange">${w.id}</span></div>
@@ -586,8 +593,13 @@ function renderCheckin(){
 
 function renderCoach(){
   const p=profile(); const insights=generateInsights(p); const aiOn=canUseOnlineAI(); const reports=p.history.filter(h=>h.aiReport || h.aiReportStatus || h.aiReportError).slice(-5).reverse();
-  return `<section class="hero"><p class="eyebrow">Coach</p><h2>Análise inteligente</h2><p>${aiOn?'IA online pronta. Ao finalizar treino, o app pode gerar um relatório automático.':(isOffline()?'Você está offline. A análise local funciona, mas IA e nuvem ficam pausadas.':'Entre na conta ou use modo local para liberar a IA online.')}</p><div class="actions"><button class="btn secondary" data-screen-go="profile">Configurar IA</button></div></section>
-  <section class="card"><div class="card-title"><h3>Status da IA</h3><span class="badge ${aiOn?'green':'yellow'}">${aiOn?'Online pronta':(isOffline()?'Offline':'Login necessário')}</span></div><p class="muted">Relatório automático ao finalizar treino: <strong>${p.ai?.autoWorkoutReport?'ativado':'desativado'}</strong></p></section>
+  const diet = p.dietPlan;
+  return `<section class="hero"><p class="eyebrow">Coach</p><h2>Análise inteligente</h2><p>${aiOn?'IA online pronta para treino, ciclo e orientação alimentar.':(isOffline()?'Você está offline. A análise local funciona, mas IA e nuvem ficam pausadas.':'Entre na conta ou use modo local para liberar a IA online.')}</p><div class="actions"><button class="btn secondary" data-screen-go="profile">Configurar IA</button></div></section>
+  <section class="card"><div class="card-title"><h3>Status da IA</h3><span class="badge ${aiOn?'green':'yellow'}">${aiOn?'Online pronta':(isOffline()?'Offline':'Login necessário')}</span></div><p class="muted">Relatório automático ao finalizar treino: <strong>${p.ai?.autoWorkoutReport?'ativado':'desativado'}</strong></p><p class="muted">Limite diário controlado no backend por usuário para evitar abuso.</p></section>
+  <section class="card"><div class="card-title"><div><h3>Orientação alimentar</h3><p>Baseada no perfil e objetivo. Não substitui nutricionista.</p></div><span class="badge orange">Beta</span></div>
+    ${diet?`<div class="ai-report"><strong>${esc(diet.title||'Plano alimentar')}</strong><p>${esc(diet.summary||'')}</p>${diet.guidelines?`<p><b>Diretrizes:</b> ${esc(Array.isArray(diet.guidelines)?diet.guidelines.join(' • '):diet.guidelines)}</p>`:''}${diet.mealStructure?`<p><b>Estrutura:</b> ${esc(Array.isArray(diet.mealStructure)?diet.mealStructure.join(' • '):diet.mealStructure)}</p>`:''}${diet.attention?`<p><b>Atenção:</b> ${esc(diet.attention)}</p>`:''}</div>`:'<div class="empty">Nenhuma orientação alimentar gerada ainda.</div>'}
+    <div class="actions"><button class="btn" data-action="generate-diet-plan">Gerar orientação alimentar</button></div>
+  </section>
   <section class="grid">${insights.map(i=>`<div class="alert ${i.type==='orange'?'orange':''}"><div>${i.icon}</div><div><strong>${esc(i.title)}</strong><p>${esc(i.text)}</p></div></div>`).join('')}</section>
   <section class="card"><div class="card-title"><h3>Últimos relatórios da IA</h3><p>Gerados ao finalizar treino</p></div>${reports.length?reports.map(h=>aiHistoryHTML(h)).join(''):'<div class="empty">Nenhum relatório de IA salvo ainda.</div>'}</section>`;
 }
@@ -616,7 +628,7 @@ function historyRowHTML(h){
 
 
 function renderProfile(){ const p=profile(); const ai=p.ai||{}; return `<section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais. Se entrar na conta, salva também na nuvem.</p></div><div class="form-grid">
-  ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}${selectHTML('experience','Nível',p.experience,['Iniciante','Intermediário','Avançado'])}${selectHTML('daysPerWeek','Dias por semana',p.daysPerWeek,['2','3','4','5','6'], v=>v+' dias')}<div class="stat"><strong>${esc(p.programLabel || programLabelForProfile(p))}</strong><span>meta do programa</span></div>
+  ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${selectHTML('sex','Sexo',p.sex,['Homem','Mulher','Outro/Prefiro não informar'])}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}${selectHTML('experience','Nível',p.experience,['Iniciante','Intermediário','Avançado'])}${selectHTML('daysPerWeek','Dias por semana',p.daysPerWeek,['2','3','4','5','6'], v=>v+' dias')}<div class="stat"><strong>${esc(p.programLabel || programLabelForProfile(p))}</strong><span>meta do programa</span></div>
   <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div></div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button><button class="btn secondary" data-action="new-profile">Novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
   <section class="card"><div class="card-title"><div><h3>Conta e sincronização</h3><p>Sem login o app continua funcionando só neste aparelho. Com login, salva também no Supabase.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}</section>
   <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Backend configurado no app. Para gerar relatório, o usuário precisa estar logado e online.</p></div><span class="badge green">Pronta</span></div><div class="form-grid">
@@ -663,6 +675,7 @@ function handleAction(a){
   if(a==='cloud-refresh') refreshLocalOrCloudStatus();
   if(a==='generate-initial-plan') generateInitialPlanFromAI({silent:false, force:true});
   if(a==='finish-cycle-ai') finishCycleAndGeneratePlan();
+  if(a==='generate-diet-plan') generateDietPlan();
 }
 
 
@@ -913,7 +926,7 @@ async function upsertCloudProfile(name){
   const user=await getCurrentCloudUser();
   if(!user) return;
   const p=profile();
-  await supabaseClient.from('profiles').upsert({id:user.id, name:name || p.name || 'Usuário', age:parseNumberValue(p.age), height:parseNumberValue(p.height), initial_weight:parseNumberValue(p.weight), goal:p.goal || null, focus:p.focus || null, notes:p.notes || null, experience:p.experience || null, days_per_week:parseNumberValue(p.daysPerWeek)});
+  await supabaseClient.from('profiles').upsert({id:user.id, name:name || p.name || 'Usuário', sex:p.sex || null, age:parseNumberValue(p.age), height:parseNumberValue(p.height), initial_weight:parseNumberValue(p.weight), goal:p.goal || null, focus:p.focus || null, notes:p.notes || null, experience:p.experience || null, days_per_week:parseNumberValue(p.daysPerWeek)});
 }
 function reportToText(report){
   if(!report) return '';
@@ -1040,7 +1053,7 @@ function buildPlanAIPayload(mode='initial', extra={}){
     kind:'workout-plan',
     mode,
     cycleChangeRequest: extra.cycleChangeRequest || '',
-    profile:{name:p.name, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
+    profile:{name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
     planRules:{daysPerWeek:clampTrainingDays(p.daysPerWeek), level:normalizeExperienceLabel(p.experience), programWeeks:programWeeksForExperience(p.experience), targetWorkouts:targetWorkoutsForProfile(p), programLabel:programLabelForProfile(p), allowedWorkoutIds:WORKOUT_LETTERS.slice(0, clampTrainingDays(p.daysPerWeek))},
     defaultTemplate:templateForProfile(p),
     currentPlan:{title:p.planMeta?.title, cycle:p.planMeta?.cycle, source:p.planMeta?.source, workouts:p.workouts},
@@ -1126,6 +1139,43 @@ function askCycleChangeRequest(){
     document.querySelector('[data-cycle-generate]').onclick=()=>finish((byId('cycleChangeRequest')?.value || '').trim());
   });
 }
+
+function buildDietAIPayload(){
+  const p=profile();
+  return {
+    kind:'diet-plan',
+    profile:{name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
+    currentPlan:{title:p.planMeta?.title, source:p.planMeta?.source, workouts:p.workouts},
+    progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, currentCycleNumber(p)+1)},
+    recentHistory:p.history.slice(-10).map(h=>({date:h.date, workoutName:h.workoutName, doneCount:h.doneCount, skippedCount:h.skippedCount, score:h.score, weights:h.weights, meta:h.meta}))
+  };
+}
+async function callDietAI(){
+  if(isOffline()) throw new Error('Você está offline. A IA não consegue gerar orientação alimentar agora.');
+  const accessToken=await getCloudAccessToken();
+  if(!accessToken) throw new Error('Entre na conta ou use modo local para usar a IA.');
+  const response=await fetch(aiUrl(profile(), AI_DIET_ENDPOINT_PATH),{
+    method:'POST',
+    headers:{'Content-Type':'application/json', 'Authorization': `Bearer ${accessToken}`},
+    body:JSON.stringify(buildDietAIPayload())
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok) throw new Error(data.error || `Erro HTTP ${response.status}`);
+  return data.diet || data.plan || data;
+}
+async function generateDietPlan(){
+  try{
+    toast('Gerando orientação alimentar...');
+    const diet=await callDietAI();
+    profile().dietPlan = {...diet, generatedAt:nowISO()};
+    save();
+    render();
+    toast('Orientação alimentar gerada.');
+  }catch(e){
+    toast('Não consegui gerar orientação alimentar: '+(e.message||'erro'));
+  }
+}
+
 async function finishCycleAndGeneratePlan(){
   const p=profile();
   if(p.progress < workoutsPerCycle(p)) return toast(`Complete pelo menos 1 ciclo (${workoutsPerCycle(p)} treinos) antes de ajustar com IA.`);
@@ -1145,7 +1195,7 @@ async function finishCycleAndGeneratePlan(){
   }
 }
 
-function exportBackup(){ state.lastBackupAt=nowISO(); save(); const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`treino100-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href); }
+function exportBackup(){ state.lastBackupAt=nowISO(); save(); const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`gym-bronze-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href); }
 document.addEventListener('change', e=>{ if(e.target?.id==='backupInput'){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ const data=JSON.parse(r.result); if(!data.profiles) throw new Error(); if(confirm('Importar backup e substituir dados atuais?')){ state=data; save(); render(); toast('Backup importado.'); } }catch{ toast('Backup inválido.'); }}; r.readAsText(f); }});
 function toast(msg){ const t=byId('toast'); t.textContent=msg; t.classList.remove('hidden'); clearTimeout(window.__toast); window.__toast=setTimeout(()=>t.classList.add('hidden'),2800); }
 
