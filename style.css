@@ -111,3 +111,21 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
 .meal-timeline{display:grid;gap:10px;margin-top:14px}.meal-item{display:grid;grid-template-columns:96px 1fr;gap:12px;padding:12px;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:18px}.meal-time{font-weight:950;color:#e0a14d;font-size:12px;letter-spacing:.02em}.meal-item strong{display:block;margin-bottom:4px}.meal-item p{margin:0!important;color:var(--soft)}.meal-item span,.meal-item em{display:block;margin-top:6px;color:var(--muted);font-size:12px;font-style:normal}.diet-report{background:rgba(201,119,34,.07);border-color:rgba(224,161,77,.18)}
 .auth-card{box-shadow:0 24px 70px rgba(0,0,0,.32)}.auth-links button{color:#e0a14d}.input,.select,textarea{background:#090a0d}.bottom-nav{background:rgba(11,12,15,.90)}
 @media (max-width:560px){.meal-item{grid-template-columns:1fr}.meal-time{font-size:11px}.bottom-nav{gap:2px}.nav-btn span{font-size:9px}}
+
+/* v5.7.2 - e-mail verification state */
+.verify-card .notice-box,
+.notice-box{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  padding:14px 16px;
+  border:1px solid rgba(201,119,34,.35);
+  border-radius:18px;
+  background:rgba(201,119,34,.08);
+  color:var(--text, #f8fafc);
+  margin:14px 0;
+}
+.notice-box span{
+  color:var(--muted, #9ca3af);
+  line-height:1.45;
+}

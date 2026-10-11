@@ -90,19 +90,73 @@ function templateForProfile(sourceProfile=null){
   const days = clampTrainingDays(p?.daysPerWeek || 5);
   const exp = normalizeExperienceLabel(p?.experience || 'Iniciante');
   const beginner = exp === 'Iniciante';
-  const intermediate = exp === 'Intermediário';
   const cardio = ['Cardio leve/moderado','cardio','cardio'];
   const core = ['Abdominal máquina ou prancha','core','core'];
+  const sexText = String(p?.sex || '').toLowerCase();
+  const isWoman = sexText.includes('mulher') || sexText.includes('femin');
   let workouts = [];
 
-  if(days === 2){
+  if(isWoman){
+    if(days === 2){
+      workouts = [
+        makeWorkout('A','A - Full body com ênfase em glúteos','Corpo inteiro + glúteos', beginner ? [
+          ['Leg press 45°','máquina'], ['Elevação pélvica','máquina/barra'], ['Puxada frontal','máquina'], ['Cadeira extensora','máquina'], ['Mesa flexora','máquina'], ['Cadeira abdutora','máquina'], core
+        ] : [
+          ['Agachamento hack ou livre','máquina/barra'], ['Elevação pélvica','máquina/barra'], ['Remada baixa','máquina'], ['Stiff com halteres','halter'], ['Cadeira extensora','máquina'], ['Cadeira abdutora','máquina'], core
+        ], exp),
+        makeWorkout('B','B - Superiores e posterior','Costas, braços e posterior', beginner ? [
+          ['Mesa flexora','máquina'], ['Leg press pés altos','máquina'], ['Puxada frontal','máquina'], ['Supino máquina ou halter','máquina/halter'], ['Desenvolvimento máquina','máquina'], ['Tríceps corda','cabo'], cardio
+        ] : [
+          ['Stiff ou levantamento romeno','halter/barra'], ['Flexora sentada ou mesa flexora','máquina'], ['Puxada frente','máquina'], ['Remada unilateral','halter/máquina'], ['Desenvolvimento','halter/máquina'], ['Tríceps na polia','cabo'], cardio
+        ], exp)
+      ];
+    } else if(days === 3){
+      workouts = [
+        makeWorkout('A','A - Glúteos e posteriores','Glúteos/posterior', beginner ? [
+          ['Elevação pélvica','máquina/barra'], ['Mesa flexora','máquina'], ['Stiff com halteres','halter'], ['Cadeira abdutora','máquina'], ['Coice no cabo','cabo'], core
+        ] : [
+          ['Elevação pélvica','máquina/barra'], ['Stiff ou romeno','halter/barra'], ['Mesa flexora','máquina'], ['Afundo ou passada','halter'], ['Cadeira abdutora','máquina'], ['Coice no cabo','cabo'], core
+        ], exp),
+        makeWorkout('B','B - Costas, bíceps e ombros','Superiores', [['Puxada frontal','máquina'], ['Remada baixa','máquina'], ['Remada unilateral','halter/máquina'], ['Elevação lateral','halter/cabo'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter'], cardio], exp),
+        makeWorkout('C','C - Quadríceps e glúteos','Quadríceps/glúteos', beginner ? [
+          ['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha sentado','máquina'], core
+        ] : [
+          ['Agachamento hack ou livre','máquina/barra'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Afundo ou passada','halter'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], core
+        ], exp)
+      ];
+    } else if(days === 4){
+      workouts = [
+        makeWorkout('A','A - Glúteos e posteriores','Glúteos/posterior', [['Elevação pélvica','máquina/barra'], ['Stiff com halteres','halter'], ['Mesa flexora','máquina'], ['Cadeira abdutora','máquina'], ['Coice no cabo','cabo'], core], exp),
+        makeWorkout('B','B - Costas e bíceps','Superiores puxada', [['Puxada frontal','máquina'], ['Remada baixa','máquina'], ['Remada unilateral','halter/máquina'], ['Peck fly inverso','máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter']], exp),
+        makeWorkout('C','C - Quadríceps e glúteos','Quadríceps/glúteos', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Afundo ou passada','halter'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], core], exp),
+        makeWorkout('D','D - Peito, ombros e tríceps','Superiores empurrar', [['Supino com halteres ou máquina','halter/máquina'], ['Desenvolvimento de ombros','halter/máquina'], ['Elevação lateral','halter/cabo'], ['Peck fly','máquina'], ['Tríceps na polia','cabo'], ['Tríceps francês','halter/cabo'], cardio], exp)
+      ];
+    } else if(days === 5){
+      workouts = [
+        makeWorkout('A','A - Glúteos e posteriores','Glúteos/posterior', [['Elevação pélvica','máquina/barra'], ['Mesa flexora','máquina'], ['Stiff com halteres','halter'], ['Cadeira abdutora','máquina'], ['Coice no cabo','cabo'], core], exp),
+        makeWorkout('B','B - Costas e bíceps','Costas/bíceps', [['Puxada frontal','máquina'], ['Remada baixa','máquina'], ['Remada unilateral','halter/máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter'], ['Peck fly inverso','máquina']], exp),
+        makeWorkout('C','C - Quadríceps e glúteos','Quadríceps/glúteos', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Afundo ou passada','halter'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], core], exp),
+        makeWorkout('D','D - Peito, ombros e tríceps','Peito/ombros/tríceps', [['Supino com halteres ou máquina','halter/máquina'], ['Desenvolvimento de ombros','halter/máquina'], ['Elevação lateral','halter/cabo'], ['Peck fly','máquina'], ['Tríceps na polia','cabo'], ['Tríceps francês','halter/cabo']], exp),
+        makeWorkout('E','E - Glúteos e pernas','Glúteos/pernas completo', [['Elevação pélvica','máquina/barra'], ['Agachamento búlgaro','halter'], ['Stiff com halteres','halter'], ['Mesa flexora','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], cardio], exp)
+      ];
+    } else {
+      workouts = [
+        makeWorkout('A','A - Glúteos e posteriores','Glúteos/posterior', [['Elevação pélvica','máquina/barra'], ['Mesa flexora','máquina'], ['Stiff com halteres','halter'], ['Cadeira abdutora','máquina'], ['Coice no cabo','cabo'], core], exp),
+        makeWorkout('B','B - Costas e bíceps','Costas/bíceps', [['Puxada frontal','máquina'], ['Remada baixa','máquina'], ['Remada unilateral','halter/máquina'], ['Peck fly inverso','máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter']], exp),
+        makeWorkout('C','C - Quadríceps e glúteos','Quadríceps/glúteos', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Afundo ou passada','halter'], ['Cadeira abdutora','máquina'], core], exp),
+        makeWorkout('D','D - Peito, ombros e tríceps','Peito/ombros/tríceps', [['Supino com halteres ou máquina','halter/máquina'], ['Desenvolvimento','halter/máquina'], ['Elevação lateral','halter/cabo'], ['Peck fly','máquina'], ['Tríceps polia','cabo'], ['Tríceps francês','halter/cabo']], exp),
+        makeWorkout('E','E - Posteriores e glúteos','Posterior/glúteos', [['Stiff ou romeno','halter/barra'], ['Flexora sentada ou mesa','máquina'], ['Elevação pélvica unilateral ou máquina','máquina'], ['Cadeira abdutora','máquina'], ['Coice no cabo','cabo'], ['Panturrilha','máquina']], exp),
+        makeWorkout('F','F - Pernas completo','Pernas geral', [['Leg press 45°','máquina'], ['Agachamento hack','máquina'], ['Cadeira extensora','máquina'], ['Mesa flexora','máquina'], ['Afundo caminhando','halter'], ['Panturrilha','máquina'], cardio], exp)
+      ];
+    }
+  } else if(days === 2){
     workouts = [
-      makeWorkout('A','Full body A','Corpo inteiro', beginner ? [
+      makeWorkout('A','A - Full body A','Corpo inteiro', beginner ? [
         ['Leg press 45°','máquina'], ['Supino máquina ou halter','máquina/halter'], ['Pulley frente','máquina'], ['Cadeira extensora','máquina'], ['Rosca direta no cabo','cabo'], ['Tríceps corda','cabo'], core
       ] : [
         ['Agachamento hack ou leg press','máquina'], ['Supino reto','halter/máquina'], ['Remada baixa','máquina'], ['Stiff com halter','halter'], ['Elevação lateral','halter'], ['Rosca direta','barra/cabo'], core
       ], exp),
-      makeWorkout('B','Full body B','Corpo inteiro', beginner ? [
+      makeWorkout('B','B - Full body B','Corpo inteiro', beginner ? [
         ['Cadeira flexora','máquina'], ['Supino inclinado máquina ou halter','máquina/halter'], ['Remada baixa','máquina'], ['Cadeira abdutora','máquina'], ['Desenvolvimento máquina','máquina'], ['Panturrilha sentado','máquina'], cardio
       ] : [
         ['Stiff ou mesa flexora','halter/máquina'], ['Supino inclinado','halter/máquina'], ['Pulley pegada neutra','máquina'], ['Cadeira extensora','máquina'], ['Desenvolvimento','halter/máquina'], ['Tríceps no crossover','cabo'], cardio
@@ -110,41 +164,41 @@ function templateForProfile(sourceProfile=null){
     ];
   } else if(days === 3){
     workouts = beginner ? [
-      makeWorkout('A','Full body A','Base e técnica', [['Leg press 45°','máquina'], ['Supino máquina','máquina'], ['Pulley frente','máquina'], ['Cadeira extensora','máquina'], ['Rosca direta cabo','cabo'], core], exp),
-      makeWorkout('B','Full body B','Posterior e costas', [['Mesa flexora','máquina'], ['Remada baixa','máquina'], ['Supino inclinado halter','halter'], ['Cadeira abdutora','máquina'], ['Tríceps corda','cabo'], cardio], exp),
-      makeWorkout('C','Full body C','Reforço geral', [['Agachamento hack','máquina'], ['Pulley neutro','máquina'], ['Peck fly','máquina'], ['Panturrilha sentado','máquina'], ['Elevação lateral','halter'], core], exp)
+      makeWorkout('A','A - Full body A','Base e técnica', [['Leg press 45°','máquina'], ['Supino máquina','máquina'], ['Pulley frente','máquina'], ['Cadeira extensora','máquina'], ['Rosca direta cabo','cabo'], core], exp),
+      makeWorkout('B','B - Full body B','Posterior e costas', [['Mesa flexora','máquina'], ['Remada baixa','máquina'], ['Supino inclinado halter','halter'], ['Cadeira abdutora','máquina'], ['Tríceps corda','cabo'], cardio], exp),
+      makeWorkout('C','C - Full body C','Reforço geral', [['Agachamento hack','máquina'], ['Pulley neutro','máquina'], ['Peck fly','máquina'], ['Panturrilha sentado','máquina'], ['Elevação lateral','halter'], core], exp)
     ] : [
-      makeWorkout('A','Push','Peito, ombro e tríceps', [['Supino inclinado','halter/máquina'], ['Supino reto','halter/máquina'], ['Peck fly','máquina'], ['Desenvolvimento','halter/máquina'], ['Elevação lateral','halter'], ['Tríceps corda','cabo']], exp),
-      makeWorkout('B','Pull','Costas e bíceps', [['Pulley frente','máquina'], ['Remada baixa','máquina'], ['Remada unilateral','halter/máquina'], ['Peck fly inverso','máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter']], exp),
-      makeWorkout('C','Legs','Pernas e core', [['Leg press 45°','máquina'], ['Agachamento hack','máquina'], ['Cadeira extensora','máquina'], ['Mesa flexora','máquina'], ['Panturrilha','máquina'], core, cardio], exp)
+      makeWorkout('A','A - Push','Peito, ombro e tríceps', [['Supino inclinado','halter/máquina'], ['Supino reto','halter/máquina'], ['Peck fly','máquina'], ['Desenvolvimento','halter/máquina'], ['Elevação lateral','halter'], ['Tríceps corda','cabo']], exp),
+      makeWorkout('B','B - Pull','Costas e bíceps', [['Pulley frente','máquina'], ['Remada baixa','máquina'], ['Remada unilateral','halter/máquina'], ['Peck fly inverso','máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter']], exp),
+      makeWorkout('C','C - Legs','Pernas e core', [['Leg press 45°','máquina'], ['Agachamento hack','máquina'], ['Cadeira extensora','máquina'], ['Mesa flexora','máquina'], ['Panturrilha','máquina'], core, cardio], exp)
     ];
   } else if(days === 4){
     workouts = [
-      makeWorkout('A','Upper A','Parte superior', [['Supino inclinado','halter/máquina'], ['Supino reto','halter/máquina'], ['Pulley frente','máquina'], ['Remada baixa','máquina'], ['Elevação lateral','halter'], ['Tríceps corda','cabo'], ['Rosca direta','barra/cabo']], exp),
-      makeWorkout('B','Lower A','Quadríceps e panturrilha', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Cadeira flexora','máquina'], ['Panturrilha sentado','máquina'], core], exp),
-      makeWorkout('C','Upper B','Costas, ombro e braços', [['Pulley neutro/supinado','máquina'], ['Remada unilateral','halter/máquina'], ['Peck fly','máquina'], ['Peck fly inverso','máquina'], ['Desenvolvimento','halter/máquina'], ['Rosca martelo','halter'], ['Tríceps máquina/cabo','máquina/cabo']], exp),
-      makeWorkout('D','Lower B','Posterior e glúteo', [['Stiff','halter/barra'], ['Mesa flexora','máquina'], ['Leg press unilateral ou bilateral','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], core, cardio], exp)
+      makeWorkout('A','A - Upper A','Parte superior', [['Supino inclinado','halter/máquina'], ['Supino reto','halter/máquina'], ['Pulley frente','máquina'], ['Remada baixa','máquina'], ['Elevação lateral','halter'], ['Tríceps corda','cabo'], ['Rosca direta','barra/cabo']], exp),
+      makeWorkout('B','B - Lower A','Quadríceps e panturrilha', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Cadeira flexora','máquina'], ['Panturrilha sentado','máquina'], core], exp),
+      makeWorkout('C','C - Upper B','Costas, ombro e braços', [['Pulley neutro/supinado','máquina'], ['Remada unilateral','halter/máquina'], ['Peck fly','máquina'], ['Peck fly inverso','máquina'], ['Desenvolvimento','halter/máquina'], ['Rosca martelo','halter'], ['Tríceps máquina/cabo','máquina/cabo']], exp),
+      makeWorkout('D','D - Lower B','Posterior e glúteo', [['Stiff','halter/barra'], ['Mesa flexora','máquina'], ['Leg press unilateral ou bilateral','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], core, cardio], exp)
     ];
   } else if(days === 5){
     workouts = [
-      makeWorkout('A','Peito + Bíceps','Parte superior', [['Supino inclinado com halter','halter'], ['Supino deitado/reto','halter/máquina'], ['Peck fly','máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter'], ['Rosca Scott/máquina ou cabo','máquina/cabo'], core, cardio], exp),
-      makeWorkout('B','Perna - Quadríceps','Perna', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Cadeira flexora','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha sentado','máquina']], exp),
-      makeWorkout('C','Costas + Tríceps','Parte superior', [['Pulley frente pegada aberta','máquina'], ['Pulley frente pegada supinada/neutra','máquina'], ['Remada baixa com triângulo','máquina'], ['Remada unilateral ou com apoio no peito','halter/máquina'], ['Peck fly inverso','máquina'], ['Tríceps barra no crossover','cabo'], ['Tríceps máquina/corda/francês','máquina/cabo'], core, cardio], exp),
-      makeWorkout('D','Ombro + Braços extra','Ombro e braços', [['Desenvolvimento com halter ou máquina','halter/máquina'], ['Elevação lateral com halter','halter'], ['Elevação lateral na polia ou máquina','máquina/cabo'], ['Face pull ou peck fly inverso','máquina/cabo'], ['Rosca extra Scott/cabo','máquina/cabo'], ['Tríceps extra corda/francês','máquina/cabo'], core], exp),
-      makeWorkout('E','Posterior/Perna','Posterior', [['Stiff com halter ou barra','halter/barra'], ['Mesa flexora','máquina'], ['Flexora em pé unilateral','máquina'], ['Leg press unilateral ou bilateral','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], core], exp)
+      makeWorkout('A','A - Peito e Bíceps','Parte superior', [['Supino inclinado com halter','halter'], ['Supino deitado/reto','halter/máquina'], ['Peck fly','máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter'], ['Rosca Scott/máquina ou cabo','máquina/cabo'], core, cardio], exp),
+      makeWorkout('B','B - Quadríceps','Perna', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Cadeira flexora','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha sentado','máquina']], exp),
+      makeWorkout('C','C - Costas e Tríceps','Parte superior', [['Pulley frente pegada aberta','máquina'], ['Pulley frente pegada supinada/neutra','máquina'], ['Remada baixa com triângulo','máquina'], ['Remada unilateral ou com apoio no peito','halter/máquina'], ['Peck fly inverso','máquina'], ['Tríceps barra no crossover','cabo'], ['Tríceps máquina/corda/francês','máquina/cabo'], core, cardio], exp),
+      makeWorkout('D','D - Ombro e braços','Ombro e braços', [['Desenvolvimento com halter ou máquina','halter/máquina'], ['Elevação lateral com halter','halter'], ['Elevação lateral na polia ou máquina','máquina/cabo'], ['Face pull ou peck fly inverso','máquina/cabo'], ['Rosca extra Scott/cabo','máquina/cabo'], ['Tríceps extra corda/francês','máquina/cabo'], core], exp),
+      makeWorkout('E','E - Posterior e pernas','Posterior', [['Stiff com halter ou barra','halter/barra'], ['Mesa flexora','máquina'], ['Flexora em pé unilateral','máquina'], ['Leg press unilateral ou bilateral','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], core], exp)
     ];
   } else {
     workouts = [
-      makeWorkout('A','Push A','Peito, ombro e tríceps', [['Supino inclinado','halter/máquina'], ['Supino reto','halter/máquina'], ['Peck fly','máquina'], ['Desenvolvimento','halter/máquina'], ['Elevação lateral','halter'], ['Tríceps corda','cabo']], exp),
-      makeWorkout('B','Pull A','Costas e bíceps', [['Pulley frente','máquina'], ['Remada baixa','máquina'], ['Remada unilateral','halter/máquina'], ['Peck fly inverso','máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter']], exp),
-      makeWorkout('C','Legs A','Quadríceps', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Cadeira flexora','máquina'], ['Panturrilha sentado','máquina'], core], exp),
-      makeWorkout('D','Push B','Peito/ombro/tríceps variação', [['Supino máquina ou halter','máquina/halter'], ['Crucifixo ou peck fly','máquina/halter'], ['Desenvolvimento máquina','máquina'], ['Elevação lateral polia/máquina','máquina/cabo'], ['Tríceps barra','cabo'], ['Tríceps francês/corda','cabo']], exp),
-      makeWorkout('E','Pull B','Costas/bíceps variação', [['Pulley neutro/supinado','máquina'], ['Remada com apoio no peito','máquina'], ['Pulldown ou remada alta','máquina/cabo'], ['Face pull','cabo'], ['Rosca Scott','máquina/cabo'], ['Rosca alternada','halter']], exp),
-      makeWorkout('F','Legs B','Posterior e glúteo', [['Stiff','halter/barra'], ['Mesa flexora','máquina'], ['Flexora em pé unilateral','máquina'], ['Leg press unilateral','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], cardio], exp)
+      makeWorkout('A','A - Push A','Peito, ombro e tríceps', [['Supino inclinado','halter/máquina'], ['Supino reto','halter/máquina'], ['Peck fly','máquina'], ['Desenvolvimento','halter/máquina'], ['Elevação lateral','halter'], ['Tríceps corda','cabo']], exp),
+      makeWorkout('B','B - Pull A','Costas e bíceps', [['Pulley frente','máquina'], ['Remada baixa','máquina'], ['Remada unilateral','halter/máquina'], ['Peck fly inverso','máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter']], exp),
+      makeWorkout('C','C - Legs A','Quadríceps', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Cadeira flexora','máquina'], ['Panturrilha sentado','máquina'], core], exp),
+      makeWorkout('D','D - Push B','Peito/ombro/tríceps variação', [['Supino máquina ou halter','máquina/halter'], ['Crucifixo ou peck fly','máquina/halter'], ['Desenvolvimento máquina','máquina'], ['Elevação lateral polia/máquina','máquina/cabo'], ['Tríceps barra','cabo'], ['Tríceps francês/corda','cabo']], exp),
+      makeWorkout('E','E - Pull B','Costas/bíceps variação', [['Pulley neutro/supinado','máquina'], ['Remada com apoio no peito','máquina'], ['Pulldown ou remada alta','máquina/cabo'], ['Face pull','cabo'], ['Rosca Scott','máquina/cabo'], ['Rosca alternada','halter']], exp),
+      makeWorkout('F','F - Legs B','Posterior e glúteo', [['Stiff','halter/barra'], ['Mesa flexora','máquina'], ['Flexora em pé unilateral','máquina'], ['Leg press unilateral','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], cardio], exp)
     ];
   }
 
-  const title = `${days} dias • ${exp}`;
+  const title = `${days} dias • ${exp}${isWoman ? ' • feminino' : ''}`;
   return { title, workouts };
 }
 function applyDefaultPlanForProfile(p, force=false){
@@ -175,7 +229,7 @@ let onboardingView = 'login';
 
 function defaultState(){
   const initialProfile = newProfile('');
-  return { activeProfileId: initialProfile.id, profiles: [initialProfile], version: 3, onboardingDone: false, entryMode: null };
+  return { activeProfileId: initialProfile.id, profiles: [initialProfile], version: 4, onboardingDone: false, entryMode: null, pendingEmailVerification: null };
 }
 function newProfile(name='Novo perfil'){
   const p = {
@@ -195,7 +249,8 @@ function migrateState(s){
   if(!s || !Array.isArray(s.profiles)) s = defaultState();
   if(typeof s.onboardingDone !== 'boolean') s.onboardingDone = s.profiles.some(hasMeaningfulProfileData);
   if(!('entryMode' in s)) s.entryMode = s.onboardingDone ? 'local' : null;
-  if(!s.version || s.version < 3) s.version = 3;
+  if(!('pendingEmailVerification' in s)) s.pendingEmailVerification = null;
+  if(!s.version || s.version < 4) s.version = 4;
   return s;
 }
 function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -236,8 +291,16 @@ function setupSupabase(){
       supabaseClient = window.supabase.createClient(normalizeSupabaseUrl(SUPABASE_URL), SUPABASE_ANON_KEY);
       cloudReady = true;
       refreshCloudUser(false);
-      supabaseClient.auth.onAuthStateChange((_event, session)=>{
+      supabaseClient.auth.onAuthStateChange(async (_event, session)=>{
         cloudUser = session?.user || null;
+        if(cloudUser && !isAnonymousCloudUser()){
+          const wasPending = !!state.pendingEmailVerification || !state.onboardingDone || state.entryMode !== 'account';
+          const ok = await completeVerifiedAccountSession();
+          if(ok && wasPending){
+            screen = 'home';
+            toast('E-mail confirmado. Sua conta está ativa.');
+          }
+        }
         render();
       });
     }
@@ -271,8 +334,9 @@ function cloudStatusHTML(){
 function isOffline(){ return !navigator.onLine; }
 function canUseOnlineAI(){ return !!(AI_BACKEND_URL && !isOffline() && cloudUser); }
 function shouldShowOnboarding(){
+  if(state.pendingEmailVerification && !cloudUser) return true;
   const p = profile();
-  return !state.onboardingDone && !hasMeaningfulProfileData(p) && !cloudUser;
+  return !state.onboardingDone && !cloudUser;
 }
 function onlineNoticeHTML(){
   if(isOffline()) return '<section class="offline-banner"><b>Modo offline</b><span>Você pode treinar normalmente, mas nuvem e IA ficam pausadas. Quando a internet voltar, use Sincronizar histórico.</span></section>';
@@ -283,8 +347,32 @@ async function getCloudAccessToken(){
   const { data } = await supabaseClient.auth.getSession();
   return data?.session?.access_token || '';
 }
+async function ensureAccountSession(email='', password=''){
+  if(!supabaseClient) return { ok:false, reason:'Supabase indisponível.' };
+  const { data: current } = await supabaseClient.auth.getSession();
+  if(current?.session?.access_token){
+    cloudUser = current.session.user || cloudUser;
+    return { ok:true, session: current.session };
+  }
+  if(email && password){
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if(!error && data?.session?.access_token){
+      cloudUser = data.user || null;
+      return { ok:true, session: data.session };
+    }
+    return { ok:false, reason: error?.message || 'Confirme seu e-mail antes de usar IA e nuvem.' };
+  }
+  return { ok:false, reason:'Sessão online não encontrada.' };
+}
 function init(){
   setupSupabase();
+  setTimeout(async()=>{ 
+    try{
+      await refreshCloudUser(false);
+      if(cloudUser && !isAnonymousCloudUser()) await completeVerifiedAccountSession();
+      render();
+    }catch(e){}
+  }, 350);
   window.addEventListener('online', () => { toast('Você voltou para o modo online.'); render(); });
   window.addEventListener('offline', () => { toast('Modo offline: treino salvo só neste aparelho.'); render(); });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
@@ -317,6 +405,7 @@ function render(){
 }
 
 function renderOnboarding(){
+  if(state.pendingEmailVerification && !cloudUser && onboardingView !== 'login' && onboardingView !== 'local') return renderVerifyEmailOnboarding();
   if(onboardingView === 'signup') return renderSignupOnboarding();
   if(onboardingView === 'local') return renderLocalOnboarding();
   return `<section class="welcome-hero login-hero">
@@ -343,6 +432,22 @@ function renderOnboarding(){
     </div>
   </section>`;
 }
+function renderVerifyEmailOnboarding(){
+  const email = state.pendingEmailVerification?.email || '';
+  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Confirme seu e-mail</p><h2>Falta só ativar sua conta</h2><p>Enviamos um link de confirmação para <b>${esc(email)}</b>. Depois de confirmar, volte aqui e faça login para liberar IA, nutri e sincronização.</p></div></section>
+  <section class="auth-center"><div class="card auth-card wide verify-card">
+    <div class="card-title"><div><h3>Verificação necessária</h3><p>Conta real precisa de e-mail confirmado. O modo local continua disponível sem verificação.</p></div><span class="badge yellow">Pendente</span></div>
+    <div class="notice-box"><b>Confira sua caixa de entrada</b><span>Abra o e-mail da Supabase/Auth e clique em “Confirm email address”. Verifique também spam/lixo eletrônico.</span></div>
+    <p class="form-error hidden" id="verifyError"></p>
+    <div class="actions">
+      <button class="btn full" data-onboarding="verify-login">Já confirmei, entrar agora</button>
+      <button class="btn secondary full" data-onboarding="verify-resend">Reenviar e-mail</button>
+      <button class="btn secondary full" data-onboarding="verify-local">Usar modo local por enquanto</button>
+    </div>
+    <p class="muted">A IA e a nuvem ficam bloqueadas na conta até o e-mail ser confirmado. Isso evita contas inválidas e erros de sessão.</p>
+  </div></section>`;
+}
+
 function renderSignupOnboarding(){
   return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Criar conta</p><h2>Monte seu perfil inicial</h2><p>Preencha seu perfil para criar um plano inicial mais coerente com sua rotina.</p></div></section>
   <section class="auth-center"><div class="card auth-card wide">
@@ -355,7 +460,7 @@ function renderSignupOnboarding(){
       <label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="signupAcceptTerms"> <span>Li e aceito os Termos, a Política de Privacidade e entendo que o Gym Bronze não substitui profissionais de saúde, nutrição ou educação física.</span></label>
     </div>
     <p class="form-error hidden" id="signupError"></p>
-    <div class="actions"><button class="btn full" data-onboarding="signup">Criar conta e gerar treino</button><button class="btn secondary full" data-onboarding="show-login">Voltar ao login</button></div>
+    <div class="actions"><button class="btn full" data-onboarding="signup">Criar conta</button><button class="btn secondary full" data-onboarding="show-login">Voltar ao login</button></div>
   </div></section>`;
 }
 function renderLocalOnboarding(){
@@ -393,6 +498,9 @@ function handleOnboarding(action){
   if(action==='login') return onboardingLogin();
   if(action==='signup') return onboardingSignup();
   if(action==='local') return onboardingLocal();
+  if(action==='verify-login') return verifyEmailLoginNow();
+  if(action==='verify-resend') return resendVerificationEmail();
+  if(action==='verify-local') return useLocalWhileEmailPending();
 }
 
 
@@ -415,6 +523,45 @@ function showFormError(id, message){
   if(!el){ toast(message); return; }
   el.textContent=message;
   el.classList.remove('hidden');
+}
+
+function friendlyAuthError(error){
+  const msg = String(error?.message || error || '').toLowerCase();
+  if(msg.includes('invalid login credentials') || msg.includes('invalid credentials')){
+    return 'Conta não encontrada ou senha incorreta. Verifique os dados, crie uma conta ou use o modo local.';
+  }
+  if(msg.includes('email not confirmed') || msg.includes('not confirmed')){
+    return 'Confirme seu e-mail antes de entrar. Abra o link enviado para sua caixa de entrada.';
+  }
+  if(msg.includes('rate limit')){
+    return 'Muitas tentativas agora. Aguarde alguns minutos e tente novamente.';
+  }
+  return error?.message || 'Não foi possível entrar agora.';
+}
+function setPendingEmailVerification(email){
+  state.pendingEmailVerification = { email: email || '', createdAt: nowISO() };
+  state.onboardingDone = false;
+  state.entryMode = null;
+  onboardingView = 'verify';
+  save();
+}
+async function completeVerifiedAccountSession(){
+  const user = await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return false;
+  // Em conta real, só libera quando o e-mail está confirmado.
+  const confirmed = !!(user.email_confirmed_at || user.confirmed_at);
+  if(!confirmed){
+    setPendingEmailVerification(user.email || state.pendingEmailVerification?.email || '');
+    return false;
+  }
+  state.pendingEmailVerification = null;
+  state.onboardingDone = true;
+  state.entryMode = 'account';
+  save();
+  try{ await upsertCloudProfile(profile().name || user.user_metadata?.display_name || 'Usuário'); }catch(e){ console.warn('profile upsert failed', e); }
+  try{ await loadLatestPlanFromCloud(); }catch(e){ console.warn('plan load failed', e); }
+  save();
+  return true;
 }
 function validateProfileInfo(info){
   if(!info.name || info.name.length < 2) return 'Informe um nome com pelo menos 2 letras.';
@@ -474,6 +621,35 @@ function createFreshLocalProfile(info){
   applyProfileInfo(info, p);
   return p;
 }
+async function verifyEmailLoginNow(){
+  const email = state.pendingEmailVerification?.email || '';
+  onboardingView = 'login';
+  render();
+  setTimeout(()=>{
+    const input = byId('loginEmail');
+    if(input && email) input.value = email;
+    const pass = byId('loginPassword');
+    if(pass) pass.focus();
+  }, 50);
+}
+async function resendVerificationEmail(){
+  if(!supabaseClient) return showFormError('verifyError', 'Supabase não carregou. Reabra o app.');
+  if(isOffline()) return showFormError('verifyError', 'Você está offline. Tente reenviar quando estiver online.');
+  const email = state.pendingEmailVerification?.email || '';
+  if(!email) return showFormError('verifyError', 'E-mail não encontrado. Crie a conta novamente.');
+  const { error } = await supabaseClient.auth.resend({ type:'signup', email });
+  if(error) return showFormError('verifyError', 'Erro ao reenviar: '+error.message);
+  toast('E-mail reenviado. Confira sua caixa de entrada.');
+}
+async function useLocalWhileEmailPending(){
+  state.pendingEmailVerification = null;
+  onboardingView = 'local';
+  state.entryMode = null;
+  state.onboardingDone = false;
+  save();
+  render();
+}
+
 async function onboardingLogin(){
   if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
   if(isOffline()) return toast('Você está offline. Faça login quando estiver online.');
@@ -481,11 +657,26 @@ async function onboardingLogin(){
   const password=byId('loginPassword')?.value || '';
   if(!email || !password) return toast('Informe e-mail e senha.');
   const { data, error } = await supabaseClient.auth.signInWithPassword({email,password});
-  if(error) return toast('Erro no login: '+error.message);
+  if(error){
+    const msg = friendlyAuthError(error);
+    state.pendingEmailVerification = msg.toLowerCase().includes('confirme') ? {email, createdAt:nowISO()} : state.pendingEmailVerification;
+    save();
+    toast(msg);
+    if(msg.toLowerCase().includes('confirme')){ onboardingView='verify'; render(); }
+    return;
+  }
   cloudUser=data?.user || null;
-  state.onboardingDone=true;
-  state.entryMode='account';
-  save();
+  if(!cloudUser) return toast('Não foi possível abrir sua sessão.');
+  const confirmed = !!(cloudUser.email_confirmed_at || cloudUser.confirmed_at);
+  if(!confirmed){
+    await supabaseClient.auth.signOut().catch(()=>{});
+    cloudUser=null;
+    setPendingEmailVerification(email);
+    toast('Confirme seu e-mail para ativar a conta.');
+    render();
+    return;
+  }
+  await completeVerifiedAccountSession();
   screen='home';
   toast('Login realizado.');
   render();
@@ -504,25 +695,49 @@ async function onboardingSignup(){
   if(passMsg) return showFormError('signupError', passMsg);
   if(password !== password2) return showFormError('signupError', 'As senhas não conferem.');
   if(!byId('signupAcceptTerms')?.checked) return showFormError('signupError', 'Aceite os Termos e a Política de Privacidade para continuar.');
+
   applyProfileInfo(info);
   markLegalAcceptance();
-  const { data, error } = await supabaseClient.auth.signUp({email,password, options:{data:{display_name:info.name}}});
-  if(error) return showFormError('signupError', 'Erro ao criar conta: '+error.message);
-  cloudUser=data?.user || null;
-  state.onboardingDone=true;
-  state.entryMode='account';
   save();
-  if(cloudUser){
-    await upsertCloudProfile(info.name);
+
+  const { data, error } = await supabaseClient.auth.signUp({
+    email,
+    password,
+    options:{
+      data:{
+        display_name:info.name,
+        sex:info.sex,
+        age:info.age,
+        height:info.height,
+        weight:info.weight,
+        goal:info.goal,
+        focus:info.focus,
+        experience:info.experience,
+        daysPerWeek:info.daysPerWeek
+      },
+      emailRedirectTo: window.location.origin + window.location.pathname
+    }
+  });
+  if(error) return showFormError('signupError', 'Erro ao criar conta: '+friendlyAuthError(error));
+
+  const user = data?.user || null;
+  const confirmed = !!(user?.email_confirmed_at || user?.confirmed_at);
+  if(data?.session?.access_token && confirmed){
+    cloudUser = data.session.user || user || null;
+    await completeVerifiedAccountSession();
     await generateInitialPlanFromAI({silent:false, fallbackDefault:true});
-    toast(data?.session ? 'Conta criada. Treino específico preparado ou fallback aplicado.' : 'Conta criada. Confirme seu e-mail para liberar IA e nuvem.');
+    screen='home';
+    toast('Conta criada e conectada. Treino específico preparado ou fallback aplicado.');
   } else {
-    applyDefaultPlanForProfile(profile(), true);
-    toast('Conta criada. Não consegui liberar a IA agora, então apliquei treino padrão.');
+    // Conta foi criada no Supabase, mas só será ativada no app após confirmação.
+    await supabaseClient.auth.signOut().catch(()=>{});
+    cloudUser = null;
+    setPendingEmailVerification(email);
+    toast('Enviamos um link. Confirme seu e-mail para ativar sua conta.');
   }
-  screen='home';
   render();
 }
+
 async function onboardingLocal(){
   const info=readOnboardingProfile('local');
   const msg=validateProfileInfo(info);
@@ -736,8 +951,8 @@ function handleAction(a){
   if(a==='cloud-sync') syncLocalHistoryToCloud();
   if(a==='cloud-refresh') refreshLocalOrCloudStatus();
   if(a==='generate-initial-plan') generateInitialPlanFromAI({silent:false, force:true, fallbackDefault:true});
-  if(a==='use-default-plan') { applyDefaultPlanForProfile(profile(), true); save(); render(); toast('Treino padrão aplicado.'); }
-  if(a==='accept-default-plan') { const p=profile(); if(p.planMeta) p.planMeta.needsDefaultChoice=false; save(); render(); toast('Treino padrão mantido.'); }
+  if(a==='use-default-plan') { applyDefaultPlanForProfile(profile(), true); save(); saveCurrentPlanToCloud('default_plan_selected').catch(()=>{}); render(); toast('Treino padrão aplicado.'); }
+  if(a==='accept-default-plan') { const p=profile(); if(p.planMeta) p.planMeta.needsDefaultChoice=false; save(); saveCurrentPlanToCloud('default_plan_accepted').catch(()=>{}); render(); toast('Treino padrão mantido.'); }
   if(a==='finish-cycle-ai') finishCycleAndGeneratePlan();
   if(a==='generate-diet-plan') generateDietPlan();
 }
@@ -758,7 +973,9 @@ function saveProfileForm(){
     if(k==='autoWorkoutReport') p.ai[k]=f.checked;
     else p.ai[k]=f.value.trim();
   });
-  save(); toast('Perfil salvo.'); render();
+  save();
+  if(hasCloudAccount()) upsertCloudProfile(p.name || 'Usuário').catch(()=>{});
+  toast('Perfil salvo.'); render();
 }
 function createProfileFlow(){ const name=prompt('Nome do novo perfil:'); if(!name) return; const p=newProfile(name); state.profiles.push(p); state.activeProfileId=p.id; save(); render(); toast('Perfil criado.'); }
 function resetProfileFlow(){ const p=profile(); if(!confirm(`Resetar TODO o perfil ${p.name || 'Perfil'}? Isso apaga treinos, cargas, histórico, check-ins e bioimpedância.`)) return; const t=prompt('Digite RESETAR para confirmar:'); if(t!=='RESETAR') return toast('Reset cancelado.'); const fresh=newProfile(p.name); fresh.id=p.id; state.profiles[state.profiles.findIndex(x=>x.id===p.id)] = fresh; save(); render(); toast('Perfil resetado.'); }
@@ -958,9 +1175,19 @@ async function cloudLogin(){
   const password=byId('cloudPassword')?.value || '';
   if(!email || !password) return toast('Informe e-mail e senha.');
   const { data, error } = await supabaseClient.auth.signInWithPassword({email,password});
-  if(error) return toast('Erro no login: '+error.message);
+  if(error) return toast(friendlyAuthError(error));
   cloudUser=data?.user || null;
-  state.onboardingDone=true; state.entryMode='account'; save();
+  const confirmed = !!(cloudUser?.email_confirmed_at || cloudUser?.confirmed_at);
+  if(!confirmed){
+    await supabaseClient.auth.signOut().catch(()=>{});
+    cloudUser=null;
+    setPendingEmailVerification(email);
+    toast('Confirme seu e-mail antes de entrar.');
+    render();
+    return;
+  }
+  await completeVerifiedAccountSession();
+  await upsertCloudProfile(profile().name || 'Usuário').catch(()=>{});
   toast('Login realizado.'); render();
 }
 async function cloudSignup(){
@@ -976,12 +1203,23 @@ async function cloudSignup(){
   if(password !== password2) return toast('As senhas não conferem.');
   if(!byId('cloudAcceptTerms')?.checked) return toast('Aceite os Termos e a Política de Privacidade.');
   p.name=name; ensureProfile(p); markLegalAcceptance(p); save();
-  const { data, error } = await supabaseClient.auth.signUp({email,password, options:{data:{display_name:name}}});
-  if(error) return toast('Erro ao criar conta: '+error.message);
-  cloudUser=data?.user || null;
-  state.onboardingDone=true; state.entryMode='account'; save();
-  if(cloudUser){ await upsertCloudProfile(name); toast('Conta criada e conectada.'); }
-  else toast('Conta criada. Verifique seu e-mail para confirmar.');
+  const { data, error } = await supabaseClient.auth.signUp({email,password, options:{data:{display_name:name}, emailRedirectTo: window.location.origin + window.location.pathname}});
+  if(error) return toast('Erro ao criar conta: '+friendlyAuthError(error));
+
+  const user = data?.user || null;
+  const confirmed = !!(user?.email_confirmed_at || user?.confirmed_at);
+  if(data?.session?.access_token && confirmed){
+    cloudUser = data.session.user || user || null;
+    await completeVerifiedAccountSession();
+    await upsertCloudProfile(name);
+    await saveCurrentPlanToCloud('account_created_existing_plan').catch(()=>{});
+    toast('Conta criada e conectada.');
+  } else {
+    await supabaseClient.auth.signOut().catch(()=>{});
+    cloudUser = null;
+    setPendingEmailVerification(email);
+    toast('Conta criada. Confirme seu e-mail para liberar IA e nuvem.');
+  }
   render();
 }
 async function cloudLogout(){
@@ -995,6 +1233,79 @@ async function upsertCloudProfile(name){
   if(!user) return;
   const p=profile();
   await supabaseClient.from('profiles').upsert({id:user.id, name:name || p.name || 'Usuário', sex:p.sex || null, age:parseNumberValue(p.age), height:parseNumberValue(p.height), initial_weight:parseNumberValue(p.weight), goal:p.goal || null, focus:p.focus || null, notes:p.notes || null, experience:p.experience || null, days_per_week:parseNumberValue(p.daysPerWeek), accepted_terms_at:p.acceptedTermsAt || null, accepted_privacy_at:p.acceptedPrivacyAt || null});
+}
+
+function serializeCurrentPlan(p=profile()){
+  return {
+    version:'gym-bronze-plan-v1',
+    planMeta:p.planMeta || {},
+    workouts:p.workouts || [],
+    queue:p.queue || [],
+    target:p.target,
+    programWeeks:p.programWeeks,
+    programLabel:p.programLabel,
+    profileSnapshot:{
+      name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight,
+      goal:p.goal, focus:p.focus, experience:p.experience, daysPerWeek:p.daysPerWeek, notes:p.notes
+    }
+  };
+}
+async function saveCurrentPlanToCloud(reason='plan_update'){
+  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
+  const user=await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
+  const p=profile();
+  if(!Array.isArray(p.workouts) || !p.workouts.length) return {ok:false, reason:'empty_plan'};
+  try{
+    const payload = serializeCurrentPlan(p);
+    const { error } = await supabaseClient.from('workout_plans').insert({
+      user_id:user.id,
+      title:p.planMeta?.title || 'Plano Gym Bronze',
+      source:p.planMeta?.source || 'unknown',
+      cycle_number:p.planMeta?.cycle || 1,
+      reason,
+      plan_json:payload
+    });
+    if(error) throw error;
+    p.cloudPlanSyncedAt=nowISO();
+    save();
+    return {ok:true};
+  }catch(e){
+    console.warn('Erro ao salvar plano na nuvem:', e);
+    return {ok:false, error:e};
+  }
+}
+async function loadLatestPlanFromCloud(){
+  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
+  const user=await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
+  try{
+    const { data, error } = await supabaseClient.from('workout_plans')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', {ascending:false})
+      .limit(1)
+      .maybeSingle();
+    if(error) throw error;
+    if(!data?.plan_json) return {ok:false, reason:'no_plan'};
+    const saved=data.plan_json;
+    const p=profile();
+    const hasLocalProgress = (p.history && p.history.length) || p.progress > 0;
+    if(!hasLocalProgress && Array.isArray(saved.workouts) && saved.workouts.length){
+      p.workouts=saved.workouts;
+      p.queue=Array.isArray(saved.queue) && saved.queue.length ? saved.queue : saved.workouts.map(w=>w.id);
+      p.planMeta=saved.planMeta || {source:data.source || 'cloud', cycle:data.cycle_number || 1, title:data.title || 'Plano salvo'};
+      p.target=saved.target || p.target;
+      p.programWeeks=saved.programWeeks || p.programWeeks;
+      p.programLabel=saved.programLabel || p.programLabel;
+      save();
+      return {ok:true, loaded:true};
+    }
+    return {ok:true, loaded:false};
+  }catch(e){
+    console.warn('Erro ao carregar plano da nuvem:', e);
+    return {ok:false, error:e};
+  }
 }
 function reportToText(report){
   if(!report) return '';
@@ -1164,6 +1475,7 @@ function applyAIPlan(plan, mode='initial'){
   applyProgramDuration(p);
   p.planMeta={source:'ai', cycle: mode==='cycle' ? (p.planMeta?.cycle||1)+1 : (p.planMeta?.cycle||1), title:normalized.title, notes:normalized.notes, updatedAt:nowISO(), programLabel:programLabelForProfile(p)};
   save();
+  saveCurrentPlanToCloud(mode==='cycle' ? 'cycle_ai_plan' : 'initial_ai_plan').catch(()=>{});
 }
 async function callPlanAI(mode='initial', extra={}){
   if(isOffline()) throw new Error('Você está offline. A IA não consegue gerar treino agora.');

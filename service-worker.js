@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gym-bronze-v5-7-polish-nutri';
+const CACHE_NAME = 'gym-bronze-v5-7-4-auth-cloud';
 const ASSETS = [
   './',
   './index.html',
