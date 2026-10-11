@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gym-bronze-v5-7-5-auth-profile';
+const CACHE_NAME = 'gym-bronze-v5-8-0';
 const ASSETS = [
   './',
   './index.html',

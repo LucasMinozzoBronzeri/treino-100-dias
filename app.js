@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'gymBronze.v57';
+const STORAGE_KEY = 'gymBronze.v579';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -335,7 +335,11 @@ function isOffline(){ return !navigator.onLine; }
 function canUseOnlineAI(){ return !!(AI_BACKEND_URL && !isOffline() && cloudUser); }
 function shouldShowOnboarding(){
   if(state.pendingEmailVerification && !cloudUser) return true;
-  const p = profile();
+  // Conta real nunca deve entrar no app sem sessão confirmada.
+  // Se o navegador ficou com localStorage antigo, volta para o login.
+  if(state.entryMode === 'account' && !hasCloudAccount()) return true;
+  // Modo local continua funcionando sem conta.
+  if(state.entryMode === 'local' && state.onboardingDone) return false;
   return !state.onboardingDone && !cloudUser;
 }
 function onlineNoticeHTML(){
@@ -918,7 +922,8 @@ function renderCoach(){
   <section class="card"><div class="card-title"><h3>Status dos recursos inteligentes</h3><span class="badge ${aiOn?'green':'yellow'}">${aiOn?'Online':(isOffline()?'Offline':'Login necessário')}</span></div><p class="muted">Relatório automático ao finalizar treino: <strong>${p.ai?.autoWorkoutReport?'ativado':'desativado'}</strong></p><p class="muted">Limite diário controlado no backend por usuário para evitar abuso.</p></section>
   <section class="card"><div class="card-title"><div><h3>Rotina alimentar</h3><p>Plano educativo baseado no seu perfil, objetivo e treino. Não substitui nutricionista.</p></div><span class="badge orange">Beta</span></div>
     ${renderDietPlanHTML(diet)}
-    <div class="actions"><button class="btn" data-action="generate-diet-plan">Gerar rotina alimentar</button></div>
+    ${diet ? `<p class="muted">Status na nuvem: <strong>${diet.cloudSynced?'salva':'não salva'}</strong>${!hasCloudAccount()?' • crie uma conta para sincronizar':''}</p>` : ''}
+    <div class="actions"><button class="btn" data-action="generate-diet-plan">Gerar rotina alimentar</button>${diet && hasCloudAccount() && !diet.cloudSynced ? '<button class="btn secondary" data-action="save-diet-cloud">Salvar rotina na nuvem</button>' : ''}</div>
   </section>
   <section class="grid">${insights.map(i=>`<div class="alert ${i.type==='orange'?'orange':''}"><div>${i.icon}</div><div><strong>${esc(i.title)}</strong><p>${esc(i.text)}</p></div></div>`).join('')}</section>
   <section class="card"><div class="card-title"><h3>Últimos relatórios</h3><p>Gerados ao finalizar treino</p></div>${reports.length?reports.map(h=>aiHistoryHTML(h)).join(''):'<div class="empty">Nenhum relatório salvo ainda.</div>'}</section>`;
@@ -961,11 +966,11 @@ function renderCloudAccount(p){
   const synced = p.history.filter(h=>h.cloudSynced).length;
   const pending = p.history.filter(h=>!h.cloudSynced).length;
   if(hasCloudAccount()){
-    return `<div class="cloud-panel"><p><b>Conta:</b> ${esc(cloudUser.email||'usuário conectado')}</p><p class="muted">Histórico local: ${p.history.length} treino(s) • Na nuvem: ${synced} • Pendentes: ${pending}</p><div class="actions"><button class="btn" data-action="cloud-sync">Sincronizar histórico com a nuvem</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button><button class="btn secondary" data-action="cloud-logout">Sair</button></div></div>`;
+    return `<div class="cloud-panel"><p><b>Conta:</b> ${esc(cloudUser.email||'usuário conectado')}</p><p class="muted">Histórico local: ${p.history.length} treino(s) • Na nuvem: ${synced} • Pendentes: ${pending}</p><div class="actions"><button class="btn" data-action="cloud-sync">Sincronizar histórico com a nuvem</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button><button class="btn secondary danger-soft" data-action="cloud-logout">Sair e limpar app</button></div></div>`;
   }
   const upgradeForm = `<div class="form-grid"><div class="field" style="grid-column:1/-1"><label>Nome para criar conta</label><input class="input" id="cloudName" value="${esc(p.name||'')}"></div><div class="field"><label>E-mail</label><input class="input" id="cloudEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div><div class="field"><label>Senha</label><input class="input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="Maiúscula, número e especial"></div><div class="field"><label>Confirmar senha</label><input class="input" id="cloudPassword2" type="password" autocomplete="new-password" placeholder="repita a senha"></div><label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="cloudAcceptTerms"> <span>Li e aceito os Termos e a Política de Privacidade.</span></label></div><div class="actions"><button class="btn" data-action="cloud-login">Entrar</button><button class="btn secondary" data-action="cloud-signup">Criar conta</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div>`;
   if(isLocalMode()){
-    return `<div class="cloud-panel"><p><b>Modo local ativo.</b></p><p class="muted">Seus treinos ficam neste aparelho. A IA online usa uma sessão anônima do Supabase quando houver internet. Para sincronizar na nuvem e recuperar em outro dispositivo, crie uma conta.</p><div class="actions"><button class="btn secondary" data-action="cloud-refresh">Atualizar IA/local</button></div></div><div class="divider"></div>${upgradeForm}`;
+    return `<div class="cloud-panel"><p><b>Modo local ativo.</b></p><p class="muted">Seus treinos ficam neste aparelho. Para salvar histórico, plano e rotina alimentar na nuvem, crie uma conta e confirme o e-mail antes de limpar o app.</p><div class="actions"><button class="btn secondary" data-action="cloud-refresh">Atualizar IA/local</button><button class="btn secondary danger-soft" data-action="local-logout">Limpar app local</button></div></div><div class="alert orange"><div>⚠️</div><div><strong>Antes de sair do modo local</strong><p>Crie uma conta primeiro para sincronizar seus dados. Depois de entrar na conta, clique em “Sair e limpar app”.</p></div></div><div class="divider"></div>${upgradeForm}`;
   }
   return `${upgradeForm}<p class="muted">Ao criar conta, talvez o Supabase peça confirmação por e-mail. O app sem login continua funcionando normalmente. Se estiver offline, o login e a nuvem ficam indisponíveis.</p>`;
 }
@@ -992,9 +997,11 @@ function handleAction(a){
   if(a==='cloud-login') cloudLogin();
   if(a==='cloud-signup') cloudSignup();
   if(a==='cloud-logout') cloudLogout();
+  if(a==='local-logout') localLogoutWarning();
+  if(a==='save-diet-cloud') saveDietPlanToCloud(profile().dietPlan, {silent:false}).then(()=>render());
   if(a==='cloud-sync') syncLocalHistoryToCloud();
   if(a==='cloud-refresh') refreshLocalOrCloudStatus();
-  if(a==='generate-initial-plan') generateInitialPlanFromAI({silent:false, force:true, fallbackDefault:true});
+  if(a==='generate-initial-plan') generateSpecificPlanFlow();
   if(a==='use-default-plan') { applyDefaultPlanForProfile(profile(), true); save(); saveCurrentPlanToCloud('default_plan_selected').catch(()=>{}); render(); toast('Treino padrão aplicado.'); }
   if(a==='accept-default-plan') { const p=profile(); if(p.planMeta) p.planMeta.needsDefaultChoice=false; save(); saveCurrentPlanToCloud('default_plan_accepted').catch(()=>{}); render(); toast('Treino padrão mantido.'); }
   if(a==='finish-cycle-ai') finishCycleAndGeneratePlan();
@@ -1266,11 +1273,63 @@ async function cloudSignup(){
   }
   render();
 }
+async function clearAppRuntimeCache(){
+  try{
+    if('caches' in window){
+      const names = await caches.keys();
+      await Promise.all(names.map(name => caches.delete(name)));
+    }
+  }catch(e){ console.warn('Não consegui limpar caches:', e); }
+  try{
+    if('serviceWorker' in navigator){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(reg => reg.unregister()));
+    }
+  }catch(e){ console.warn('Não consegui remover service workers:', e); }
+}
+async function syncCurrentDataBeforeLogout(){
+  const p=profile();
+  const result={profile:false, workouts:false, plan:false, diet:false};
+  if(!hasCloudAccount()) return result;
+  try{ await upsertCloudProfile(p.name || 'Usuário'); result.profile=true; }catch(e){ console.warn('Falha ao sincronizar perfil antes do logout:', e); }
+  try{ await syncLocalHistoryToCloud({silent:true}); result.workouts=true; }catch(e){ console.warn('Falha ao sincronizar histórico antes do logout:', e); }
+  try{ await saveCurrentPlanToCloud('logout_sync'); result.plan=true; }catch(e){ console.warn('Falha ao sincronizar plano antes do logout:', e); }
+  try{ await saveDietPlanToCloud(p.dietPlan, {silent:true}); result.diet=true; }catch(e){ console.warn('Falha ao sincronizar nutri antes do logout:', e); }
+  return result;
+}
+async function hardResetLocalAppState(){
+  try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
+  try{ sessionStorage.clear(); }catch(e){}
+  state = defaultState();
+  screen = 'home';
+  onboardingView = 'login';
+  cloudUser = null;
+}
+async function localLogoutWarning(){
+  const p=profile();
+  const hasLocalData = (p.history&&p.history.length) || (p.workouts&&p.workouts.length) || p.dietPlan || (p.checkins&&p.checkins.length) || (p.bio&&p.bio.length);
+  const msg = hasLocalData
+    ? 'Você está no modo local. Se limpar agora, os dados deste aparelho podem ser perdidos.\n\nPara salvar na nuvem, cancele, crie uma conta, confirme o e-mail, entre na conta e clique em “Sair e limpar app”.\n\nDeseja limpar mesmo assim?'
+    : 'Limpar este perfil local e voltar para a tela inicial?';
+  if(!confirm(msg)) return;
+  await clearAppRuntimeCache();
+  await hardResetLocalAppState();
+  save();
+  toast('Modo local limpo.');
+  render();
+}
 async function cloudLogout(){
   if(!supabaseClient) return;
-  await supabaseClient.auth.signOut();
-  cloudUser=null;
-  toast('Você saiu da conta.'); render();
+  const ok = confirm('Sair da conta e limpar os dados/cache locais deste aparelho?\n\nAntes de sair, o Gym Bronze vai tentar sincronizar perfil, treinos, plano atual e rotina alimentar na nuvem. Depois disso, este aparelho volta para a tela inicial.');
+  if(!ok) return;
+  toast('Sincronizando dados antes de sair...');
+  await syncCurrentDataBeforeLogout();
+  try{ await supabaseClient.auth.signOut(); }catch(e){ console.warn('Falha ao sair do Supabase:', e); }
+  await clearAppRuntimeCache();
+  await hardResetLocalAppState();
+  save();
+  toast('Você saiu. Cache local limpo.');
+  render();
 }
 async function upsertCloudProfile(name, sourceInfo=null){
   const user=await getCurrentCloudUser();
@@ -1452,18 +1511,24 @@ async function saveWorkoutToCloud(p, h, opts={}){
     return {ok:false, error:e};
   }
 }
-async function syncLocalHistoryToCloud(){
+async function syncLocalHistoryToCloud(opts={}){
   const p=profile();
   const user=await getCurrentCloudUser();
-  if(!user || !hasCloudAccount()) return toast('Crie uma conta ou entre para sincronizar na nuvem.');
+  if(!user || !hasCloudAccount()){
+    if(!opts.silent) toast('Crie uma conta ou entre para sincronizar na nuvem.');
+    return {ok:false, sent:0, skipped:0, failed:0};
+  }
   let sent=0, skipped=0, failed=0;
   for(const h of p.history){
     if(h.cloudSynced && (!h.aiReport || h.cloudReportSynced)){ skipped++; continue; }
     const result=await saveWorkoutToCloud(p,h,{silent:true});
     if(result.ok) sent++; else failed++;
   }
+  await saveCurrentPlanToCloud('manual_sync').catch(()=>{});
+  await saveDietPlanToCloud(p.dietPlan, {silent:true}).catch(()=>{});
   save(); render();
-  toast(`Sincronização: ${sent} enviado(s), ${skipped} já estavam, ${failed} falha(s).`);
+  if(!opts.silent) toast(`Sincronização: ${sent} enviado(s), ${skipped} já estavam, ${failed} falha(s).`);
+  return {ok: failed===0, sent, skipped, failed};
 }
 async function testAIConnection(){
   saveProfileForm();
@@ -1551,6 +1616,40 @@ async function callPlanAI(mode='initial', extra={}){
   if(!response.ok) throw new Error(data.error || `Erro HTTP ${response.status}`);
   return data.plan || data;
 }
+async function askInitialPlanFocus(){
+  return new Promise((resolve)=>{
+    const p=profile();
+    const layer=byId('modalLayer');
+    layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Treino específico</p><h2>Qual é seu foco agora?</h2><p class="muted">Confirme ou ajuste objetivo e foco antes da IA gerar o treino. Isso ajuda a reduzir treinos genéricos.</p></div><button class="close" data-plan-cancel>×</button></div>
+      <div class="field"><label>Objetivo principal</label><input class="input" id="planGoalInput" value="${esc(p.goal || '')}" placeholder="Ex: ganhar massa e secar, emagrecer, força, hipertrofia"></div>
+      <div class="field"><label>Foco do treino</label><input class="input" id="planFocusInput" value="${esc(p.focus || '')}" placeholder="Ex: glúteos e pernas, membros superiores, braços, costas, condicionamento"></div>
+      <div class="field"><label>Observações para a IA</label><textarea id="planNotesInput" placeholder="Ex: tenho dor no ombro, treino até 60 min, evitar agachamento livre">${esc(p.notes || '')}</textarea></div>
+      <div class="actions"><button class="btn" data-plan-generate>Gerar treino específico</button><button class="btn secondary" data-plan-cancel>Cancelar</button></div>
+    </div>`;
+    layer.classList.remove('hidden');
+    const finish=(value)=>{ layer.classList.add('hidden'); layer.innerHTML=''; resolve(value); };
+    document.querySelectorAll('[data-plan-cancel]').forEach(b=>b.onclick=()=>finish(null));
+    document.querySelector('[data-plan-generate]').onclick=()=>{
+      finish({
+        goal:(byId('planGoalInput')?.value || '').trim(),
+        focus:(byId('planFocusInput')?.value || '').trim(),
+        notes:(byId('planNotesInput')?.value || '').trim()
+      });
+    };
+  });
+}
+async function generateSpecificPlanFlow(){
+  const info = await askInitialPlanFocus();
+  if(info === null) return;
+  const p=profile();
+  p.goal = info.goal || p.goal;
+  p.focus = info.focus || p.focus;
+  p.notes = info.notes || p.notes;
+  save();
+  if(hasCloudAccount()) upsertCloudProfile(p.name || 'Usuário').catch(()=>{});
+  await generateInitialPlanFromAI({silent:false, force:true, fallbackDefault:true});
+}
+
 async function generateInitialPlanFromAI(opts={}){
   const p=profile();
   if(!opts.force && p.planMeta?.source==='ai') return;
@@ -1587,6 +1686,67 @@ function askCycleChangeRequest(){
   });
 }
 
+function dietPlanTitle(diet){
+  return String(diet?.title || diet?.name || 'Rotina alimentar Gym Bronze');
+}
+function dietPlanSummary(diet){
+  return String(diet?.summary || diet?.overview || diet?.notes || diet?.explanation || 'Rotina alimentar educativa gerada pelo Gym Bronze.');
+}
+async function saveDietPlanToCloud(diet, opts={}){
+  if(!diet) return {ok:false, reason:'no_diet'};
+  if(!supabaseClient) return {ok:false, reason:'supabase_not_ready'};
+  if(!hasCloudAccount()){
+    if(!opts.silent){
+      if(isLocalMode()) toast('Rotina alimentar gerada. Crie uma conta para salvar na nuvem.');
+      else toast('Entre em uma conta confirmada para salvar a rotina na nuvem.');
+    }
+    return {ok:false, reason:'no_cloud_account'};
+  }
+  const user=await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
+  try{
+    await upsertCloudProfile(profile().name || 'Usuário');
+    const payload = {...diet, savedFromApp:true, savedAt:nowISO()};
+    const row = {
+      user_id:user.id,
+      title:dietPlanTitle(diet),
+      summary:dietPlanSummary(diet),
+      plan_json:payload,
+      provider:'gemini',
+      model:'gemini-3.5-flash-lite'
+    };
+
+    // Mantém apenas a rotina alimentar mais recente do usuário.
+    // Isso evita várias linhas antigas e garante que um novo plano atualize o BD.
+    const { error: delError } = await supabaseClient
+      .from('nutrition_plans')
+      .delete()
+      .eq('user_id', user.id);
+    if(delError) throw delError;
+
+    const { data, error } = await supabaseClient
+      .from('nutrition_plans')
+      .insert(row)
+      .select('id')
+      .single();
+    if(error) throw error;
+
+    diet.cloudSynced = true;
+    diet.cloudNutritionPlanId = data?.id || null;
+    diet.cloudSyncedAt = nowISO();
+    save();
+    if(!opts.silent) toast('Rotina alimentar salva na nuvem.');
+    return {ok:true, id:data?.id || null};
+  }catch(e){
+    console.warn('Erro ao salvar rotina alimentar na nuvem:', e);
+    if(!opts.silent){
+      const msg = e?.message || e?.details || 'erro desconhecido';
+      toast('Não consegui salvar nutri na nuvem: '+msg);
+    }
+    return {ok:false, error:e};
+  }
+}
+
 function buildDietAIPayload(){
   const p=profile();
   return {
@@ -1614,10 +1774,17 @@ async function generateDietPlan(){
   try{
     toast('Gerando rotina alimentar...');
     const diet=await callDietAI();
-    profile().dietPlan = {...diet, generatedAt:nowISO()};
+    profile().dietPlan = {...diet, generatedAt:nowISO(), cloudSynced:false};
     save();
+    const cloudResult = await saveDietPlanToCloud(profile().dietPlan, {silent:true});
     render();
-    toast('Rotina alimentar gerada.');
+    if(profile().dietPlan.cloudSynced) toast('Rotina alimentar gerada e salva na nuvem.');
+    else if(isLocalMode()) toast('Rotina alimentar gerada. Crie uma conta para salvar na nuvem.');
+    else if(hasCloudAccount()){
+      const msg = cloudResult?.error?.message || cloudResult?.reason || '';
+      toast('Rotina gerada, mas não salvou na nuvem.'+(msg ? ' '+msg : ''));
+    }
+    else toast('Rotina alimentar gerada.');
   }catch(e){
     toast('Não consegui gerar rotina alimentar: '+(e.message||'erro'));
   }
