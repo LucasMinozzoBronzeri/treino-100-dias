@@ -598,6 +598,7 @@ async function completeVerifiedAccountSession(){
   save();
   try{ await upsertCloudProfile(profile().name || user.user_metadata?.display_name || 'Usuário', signupInfo); }catch(e){ console.warn('profile upsert failed', e); }
   try{ await loadLatestPlanFromCloud(); }catch(e){ console.warn('plan load failed', e); }
+  try{ await loadLatestDietPlanFromCloud(); }catch(e){ console.warn('diet load failed', e); }
   save();
   return true;
 }
@@ -923,7 +924,7 @@ function renderCoach(){
   <section class="card"><div class="card-title"><div><h3>Rotina alimentar</h3><p>Plano educativo baseado no seu perfil, objetivo e treino. Não substitui nutricionista.</p></div><span class="badge orange">Beta</span></div>
     ${renderDietPlanHTML(diet)}
     ${diet ? `<p class="muted">Status na nuvem: <strong>${diet.cloudSynced?'salva':'não salva'}</strong>${!hasCloudAccount()?' • crie uma conta para sincronizar':''}</p>` : ''}
-    <div class="actions"><button class="btn" data-action="generate-diet-plan">Gerar rotina alimentar</button>${diet && hasCloudAccount() && !diet.cloudSynced ? '<button class="btn secondary" data-action="save-diet-cloud">Salvar rotina na nuvem</button>' : ''}</div>
+    <div class="actions"><button class="btn" data-action="generate-diet-plan">Gerar rotina alimentar</button>${hasCloudAccount() ? '<button class="btn secondary" data-action="load-diet-cloud">Atualizar nutri da nuvem</button>' : ''}${diet && hasCloudAccount() && !diet.cloudSynced ? '<button class="btn secondary" data-action="save-diet-cloud">Salvar rotina na nuvem</button>' : ''}</div>
   </section>
   <section class="grid">${insights.map(i=>`<div class="alert ${i.type==='orange'?'orange':''}"><div>${i.icon}</div><div><strong>${esc(i.title)}</strong><p>${esc(i.text)}</p></div></div>`).join('')}</section>
   <section class="card"><div class="card-title"><h3>Últimos relatórios</h3><p>Gerados ao finalizar treino</p></div>${reports.length?reports.map(h=>aiHistoryHTML(h)).join(''):'<div class="empty">Nenhum relatório salvo ainda.</div>'}</section>`;
@@ -999,6 +1000,7 @@ function handleAction(a){
   if(a==='cloud-logout') cloudLogout();
   if(a==='local-logout') localLogoutWarning();
   if(a==='save-diet-cloud') saveDietPlanToCloud(profile().dietPlan, {silent:false}).then(()=>render());
+  if(a==='load-diet-cloud') loadLatestDietPlanFromCloud().then(r=>{ render(); toast(r?.loaded?'Rotina alimentar carregada da nuvem.':'Nenhuma rotina nova encontrada na nuvem.'); });
   if(a==='cloud-sync') syncLocalHistoryToCloud();
   if(a==='cloud-refresh') refreshLocalOrCloudStatus();
   if(a==='generate-initial-plan') generateSpecificPlanFlow();
@@ -1216,6 +1218,10 @@ async function refreshLocalOrCloudStatus(){
       cloudUser=data?.user || null;
     }catch(e){}
   }
+  if(hasCloudAccount()){
+    await loadLatestPlanFromCloud().catch(()=>{});
+    await loadLatestDietPlanFromCloud().catch(()=>{});
+  }
   render();
   toast(cloudUser ? (isLocalMode()?'Modo local com IA pronto.':'Conta conectada.') : 'Sem sessão online ativa.');
 }
@@ -1427,6 +1433,42 @@ async function loadLatestPlanFromCloud(){
     return {ok:false, error:e};
   }
 }
+async function loadLatestDietPlanFromCloud(){
+  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
+  const user=await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
+  try{
+    const { data, error } = await supabaseClient.from('nutrition_plans')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', {ascending:false})
+      .limit(1)
+      .maybeSingle();
+    if(error) throw error;
+    if(!data?.plan_json) return {ok:false, reason:'no_diet_plan'};
+    const p=profile();
+    // Só carrega do BD se não houver uma rotina local mais recente não sincronizada.
+    const localTime = p.dietPlan?.generatedAt || p.dietPlan?.cloudSyncedAt || '';
+    const cloudTime = data.created_at || '';
+    const hasUnsyncedLocal = p.dietPlan && !p.dietPlan.cloudSynced && localTime && cloudTime && new Date(localTime) > new Date(cloudTime);
+    if(!hasUnsyncedLocal){
+      p.dietPlan = {
+        ...data.plan_json,
+        cloudSynced:true,
+        cloudNutritionPlanId:data.id,
+        cloudSyncedAt:data.created_at,
+        generatedAt:data.plan_json?.generatedAt || data.created_at
+      };
+      save();
+      return {ok:true, loaded:true};
+    }
+    return {ok:true, loaded:false, reason:'local_newer'};
+  }catch(e){
+    console.warn('Erro ao carregar nutri da nuvem:', e);
+    return {ok:false, error:e};
+  }
+}
+
 function reportToText(report){
   if(!report) return '';
   if(typeof report==='string') return report;
