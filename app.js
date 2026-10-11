@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '6.5.0';
+const APP_VERSION = '6.6.0';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -286,6 +286,7 @@ function ensureProfile(p){
   if(typeof p.ai.autoWorkoutReport !== 'boolean') p.ai.autoWorkoutReport = true;
   if(!Array.isArray(p.history)) p.history=[];
   if(!Array.isArray(p.dailyCheckins)) p.dailyCheckins=[];
+  if(!p.nutritionChecks) p.nutritionChecks={};
   if(!Array.isArray(p.checkins)) p.checkins=[];
   if(!Array.isArray(p.bio)) p.bio=[];
   return p;
@@ -369,12 +370,13 @@ function dailyScore(p=profile()){
   const train=workoutDoneToday(p);
   const check=!!dailyCheckinToday(p);
   const photoCheck=checkinDoneToday(p);
+  const nutri=nutritionStats(p);
   const hasDiet=!!p.dietPlan;
   let score=0;
-  if(train) score+=50;
+  if(train) score+=45;
   if(check) score+=25;
   else if(photoCheck) score+=15;
-  if(hasDiet) score+=15;
+  if(hasDiet) score+=Math.round((nutri.total ? nutri.pct : 50) * 0.20);
   if(hasPlan) score+=10;
   return Math.min(100,score);
 }
@@ -407,6 +409,69 @@ function dietMeals(diet){
     };
   });
 }
+function nutritionDayKey(d=new Date()){ return dateKey(d); }
+function mealKey(m,i){
+  return 'm_'+i+'_'+String(m.time||'').replace(/\W+/g,'').slice(0,8)+'_'+String(m.title||'ref').toLowerCase().replace(/\W+/g,'').slice(0,16);
+}
+function nutritionStateForDay(p=profile(), key=nutritionDayKey()){
+  if(!p.nutritionChecks) p.nutritionChecks={};
+  if(!p.nutritionChecks[key]) p.nutritionChecks[key]={dateKey:key, updatedAt:null, meals:{}};
+  return p.nutritionChecks[key];
+}
+function nutritionStats(p=profile(), key=nutritionDayKey()){
+  const meals=dietMeals(p.dietPlan);
+  const day=nutritionStateForDay(p,key);
+  const total=meals.length;
+  const done=meals.filter((m,i)=>day.meals?.[mealKey(m,i)]?.done).length;
+  const pct=total ? Math.round(done/total*100) : 0;
+  return {meals, day, total, done, pct};
+}
+function recentNutritionStats(p=profile(), n=7){
+  const entries=Object.values(p.nutritionChecks||{}).sort((a,b)=>String(b.dateKey).localeCompare(String(a.dateKey))).slice(0,n);
+  return entries.map(day=>{
+    const meals=dietMeals(p.dietPlan);
+    const total=meals.length || Object.keys(day.meals||{}).length;
+    const done=Object.values(day.meals||{}).filter(x=>x.done).length;
+    return {dateKey:day.dateKey, total, done, pct:total?Math.round(done/total*100):0};
+  });
+}
+function toggleNutritionMeal(i){
+  const p=profile();
+  const stats=nutritionStats(p);
+  const meal=stats.meals[i];
+  if(!meal) return;
+  const key=mealKey(meal,i);
+  const prev=stats.day.meals[key] || {};
+  stats.day.meals[key]={done:!prev.done, checkedAt:nowISO(), title:meal.title, time:meal.time};
+  stats.day.updatedAt=nowISO();
+  save();
+  render();
+}
+function resetNutritionToday(){
+  const p=profile();
+  const key=nutritionDayKey();
+  if(!p.nutritionChecks?.[key]) return toast('Nada para limpar hoje.');
+  if(!confirm('Limpar checklist de nutrição de hoje?')) return;
+  delete p.nutritionChecks[key];
+  save();
+  render();
+  toast('Checklist de hoje limpo.');
+}
+function renderNutritionChecklistHTML(p=profile()){
+  const stats=nutritionStats(p);
+  if(!p.dietPlan) return '<div class="empty">Gere uma rotina alimentar para liberar o checklist diário.</div>';
+  if(!stats.total) return '<div class="empty">Rotina salva, mas sem refeições estruturadas para checklist.</div>';
+  return `<div class="nutrition-check-head"><div><strong>${stats.done}/${stats.total} refeições feitas</strong><span>${stats.pct}% de aderência hoje</span></div><div class="mini-bar"><i style="width:${stats.pct}%"></i></div></div>
+    <div class="nutrition-checklist">${stats.meals.map((m,i)=>{
+      const k=mealKey(m,i);
+      const item=stats.day.meals?.[k] || {};
+      return `<button class="nutrition-meal ${item.done?'done':''}" type="button" data-meal-check="${i}">
+        <span class="meal-check">${item.done?'✓':'○'}</span>
+        <span><strong>${esc(m.title||'Refeição')}</strong><small>${esc((m.time?m.time+' • ':'')+(m.text||m.portions||''))}</small>${item.checkedAt?`<em>Marcado às ${fmtTime(item.checkedAt)}</em>`:''}</span>
+      </button>`;
+    }).join('')}</div>`;
+}
+
 function nextDietMeal(p=profile()){
   const meals=dietMeals(p.dietPlan);
   if(!meals.length) return null;
@@ -429,6 +494,7 @@ function todayMissionHTML(p=profile()){
   const weekPct=Math.min(100,Math.round((weekDone/Math.max(1,weekTarget))*100));
   const score=dailyScore(p);
   const meal=nextDietMeal(p);
+  const nutri=nutritionStats(p);
   const daily=dailyCheckinToday(p);
   const levelInfo=levelFromXp(ensureGamification(p).xp);
   const missionTitle=done ? 'Missão do dia cumprida' : hasPlan ? 'Missão de hoje' : 'Monte sua missão';
@@ -461,8 +527,8 @@ function todayMissionHTML(p=profile()){
       <div><strong>Check-in diário</strong><span>${daily ? readinessLabel(daily)+' • '+daily.readinessScore+'%' : 'sono, energia e dor'}</span></div>
       <b>${daily?'✓':'⚡'}</b>
     </div>
-    <div class="today-card">
-      <div><strong>Nutri</strong><span>${meal ? esc((meal.time?meal.time+' • ':'')+meal.title) : (p.dietPlan ? 'rotina salva' : 'sem rotina ainda')}</span></div>
+    <div class="today-card ${nutri.total&&nutri.done===nutri.total?'done':''}" data-screen-go="coach">
+      <div><strong>Nutri</strong><span>${nutri.total ? `${nutri.done}/${nutri.total} refeições • ${nutri.pct}%` : (meal ? esc((meal.time?meal.time+' • ':'')+meal.title) : (p.dietPlan ? 'rotina salva' : 'sem rotina ainda'))}</span></div>
       <b>${p.dietPlan?'🥗':'+'}</b>
     </div>
   </section>`;
@@ -846,6 +912,7 @@ function init(){
   window.addEventListener('offline', () => { toast('Modo offline: treino salvo só neste aparelho.'); render(); });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.addEventListener('click',()=>setScreen(btn.dataset.screen)));
+  const quickBtn=byId('openQuickMenu'); if(quickBtn) quickBtn.addEventListener('click', openQuickMenuModal);
   byId('openProfileSwitcher').addEventListener('click', openProfileSwitcher);
   byId('openLevelModal')?.addEventListener('click', openLevelModal);
   render();
@@ -1430,6 +1497,10 @@ function renderCoach(){
     ${diet ? `<p class="muted">Status na nuvem: <strong>${diet.cloudSynced?'salva':'não salva'}</strong>${!hasCloudAccount()?' • crie uma conta para sincronizar':''}</p>` : ''}
     <div class="actions"><button class="btn" data-action="generate-diet-plan">Gerar rotina alimentar</button>${hasCloudAccount() ? '<button class="btn secondary" data-action="load-diet-cloud">Atualizar nutri da nuvem</button>' : ''}${diet && hasCloudAccount() && !diet.cloudSynced ? '<button class="btn secondary" data-action="save-diet-cloud">Salvar rotina na nuvem</button>' : ''}</div>
   </section>
+  <section class="card"><div class="card-title"><div><h3>Checklist de nutrição</h3><p>Marque as refeições feitas hoje. Isso entra no score do dia.</p></div><span class="badge green">${nutritionStats(p).pct}% hoje</span></div>
+    ${renderNutritionChecklistHTML(p)}
+    <div class="actions"><button class="btn secondary" data-action="reset-nutrition-today">Limpar hoje</button>${hasCloudAccount()?'<button class="btn secondary" data-action="save-diet-cloud">Salvar nutri na nuvem</button>':''}</div>
+  </section>
   <section class="grid">${insights.map(i=>`<div class="alert ${i.type==='orange'?'orange':''}"><div>${i.icon}</div><div><strong>${esc(i.title)}</strong><p>${esc(i.text)}</p></div></div>`).join('')}</section>
   <section class="card"><div class="card-title"><h3>Últimos relatórios</h3><p>Gerados ao finalizar treino</p></div>${reports.length?reports.map(h=>aiHistoryHTML(h)).join(''):'<div class="empty">Nenhum relatório salvo ainda.</div>'}</section>`;
 }
@@ -1535,6 +1606,7 @@ function bindScreen(){
   document.querySelectorAll('[data-screen-go]').forEach(el=>el.onclick=()=>setScreen(el.dataset.screenGo));
   document.querySelectorAll('[data-open-workout]').forEach(el=>el.onclick=()=>openWorkout(el.dataset.openWorkout));
   document.querySelectorAll('[data-action]').forEach(el=>el.onclick=()=>handleAction(el.dataset.action));
+  document.querySelectorAll('[data-meal-check]').forEach(el=>el.onclick=()=>toggleNutritionMeal(Number(el.dataset.mealCheck)));
   document.querySelectorAll('[data-switch-profile]').forEach(el=>el.onclick=()=>{state.activeProfileId=el.dataset.switchProfile; save(); render();});
 }
 function handleAction(a){
@@ -1563,6 +1635,8 @@ function handleAction(a){
   if(a==='accept-default-plan') { const p=profile(); if(p.planMeta) p.planMeta.needsDefaultChoice=false; save(); saveCurrentPlanToCloud('default_plan_accepted').catch(()=>{}); render(); toast('Treino padrão mantido.'); }
   if(a==='finish-cycle-ai') finishCycleAndGeneratePlan();
   if(a==='generate-diet-plan') generateDietPlan();
+  if(a==='reset-nutrition-today') resetNutritionToday();
+  if(a==='open-quick-menu') openQuickMenuModal();
   if(a==='open-levels') openLevelModal();
   if(a==='account-switch') openProfileSwitcher();
   if(a==='sync-xp-cloud') syncXpEventsToCloud({silent:false}).then(()=>render());
@@ -1783,6 +1857,28 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
 
 }
 
+function openQuickMenuModal(){
+  const p=profile();
+  const layer=byId('modalLayer');
+  const items=[
+    ['home','🏠','Início','Missão do dia'],
+    ['workouts','🏋️','Treinos','Plano e execução'],
+    ['coach','🥗','Nutri','Rotina e checklist'],
+    ['checkin','⚡','Check-in','Diário e físico'],
+    ['progress','📈','Progresso','Cargas e histórico'],
+    ['profile','👤','Perfil','Conta e segurança']
+  ];
+  layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Menu rápido</p><h2>Gym Bronze</h2><p class="muted">Atalhos para as áreas principais e ações rápidas.</p></div><button class="close" data-close>×</button></div>
+    <div class="quick-grid">${items.map(([screenKey,icon,title,desc])=>`<button class="quick-item" data-quick-screen="${screenKey}"><b>${icon}</b><span><strong>${title}</strong><small>${desc}</small></span></button>`).join('')}</div>
+    <div class="divider"></div>
+    <div class="actions"><button class="btn" data-quick-action="daily-checkin">Check-in rápido</button><button class="btn secondary" data-quick-action="account-switch">Alternar conta</button>${p.dietPlan?'<button class="btn secondary" data-quick-screen="coach">Checklist nutri</button>':'<button class="btn secondary" data-quick-action="generate-diet-plan">Gerar nutri</button>'}</div>
+    <p class="muted">v${APP_VERSION}</p>
+  </div>`;
+  layer.classList.remove('hidden');
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
+  document.querySelectorAll('[data-quick-screen]').forEach(b=>b.onclick=()=>{ const s=b.dataset.quickScreen; closeModal(); setScreen(s); });
+  document.querySelectorAll('[data-quick-action]').forEach(b=>b.onclick=()=>{ const a=b.dataset.quickAction; closeModal(); handleAction(a); });
+}
 function openProfileSwitcher(){
   const layer=byId('modalLayer');
   const list=(state.profiles||[]).map(p=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((p.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(p.name || 'Perfil')}</strong><div class="small">${p.accountEmail?esc(p.accountEmail)+' • ':''}${levelFromXp(ensureGamification(p).xp).rank.name} • Nv. ${levelFromXp(ensureGamification(p).xp).roman}</div></div></div><button class="btn sm ${p.id===state.activeProfileId?'green':'secondary'}" data-modal-switch-profile="${p.id}">${p.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('');
@@ -2577,6 +2673,8 @@ function buildDietAIPayload(){
     progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, currentCycleNumber(p)+1)},
     todayReadiness:dailyCheckinToday(p),
     recentDailyCheckins:recentDailyCheckins(p,7),
+    nutritionToday:nutritionStats(p),
+    recentNutrition:recentNutritionStats(p,7),
     recentHistory:p.history.slice(-10).map(h=>({date:h.date, startedAt:h.startedAt, finishedAt:h.finishedAt || h.date, durationMinutes:h.durationMinutes, workoutName:h.workoutName, doneCount:h.doneCount, skippedCount:h.skippedCount, score:h.score, weights:h.weights, meta:h.meta}))
   };
 }
