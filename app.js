@@ -538,8 +538,30 @@ function friendlyAuthError(error){
   }
   return error?.message || 'Não foi possível entrar agora.';
 }
-function setPendingEmailVerification(email){
-  state.pendingEmailVerification = { email: email || '', createdAt: nowISO() };
+function normalizeProfileInfoFromUser(user){
+  const meta = user?.user_metadata || {};
+  return {
+    name: meta.display_name || meta.name || user?.email?.split('@')[0] || '',
+    age: meta.age || '',
+    sex: meta.sex || '',
+    height: meta.height || '',
+    weight: meta.weight || meta.initial_weight || '',
+    goal: meta.goal || '',
+    focus: meta.focus || '',
+    experience: meta.experience || 'Iniciante',
+    daysPerWeek: String(meta.daysPerWeek || meta.days_per_week || 5),
+    notes: meta.notes || ''
+  };
+}
+function setPendingEmailVerification(email, profileInfo=null, legalInfo=null){
+  const current = state.pendingEmailVerification || {};
+  state.pendingEmailVerification = {
+    email: email || current.email || '',
+    createdAt: current.createdAt || nowISO(),
+    profileInfo: profileInfo || current.profileInfo || null,
+    acceptedTermsAt: legalInfo?.acceptedTermsAt || current.acceptedTermsAt || null,
+    acceptedPrivacyAt: legalInfo?.acceptedPrivacyAt || current.acceptedPrivacyAt || null
+  };
   state.onboardingDone = false;
   state.entryMode = null;
   onboardingView = 'verify';
@@ -554,11 +576,23 @@ async function completeVerifiedAccountSession(){
     setPendingEmailVerification(user.email || state.pendingEmailVerification?.email || '');
     return false;
   }
+
+  // Recupera os dados completos preenchidos no cadastro.
+  // Prioridade: dados pendentes no navegador; fallback: metadata do Supabase.
+  const pending = state.pendingEmailVerification || {};
+  const signupInfo = pending.profileInfo || normalizeProfileInfoFromUser(user);
+  if(signupInfo && signupInfo.name){
+    applyProfileInfo(signupInfo, profile());
+  }
+  if(pending.acceptedTermsAt) profile().acceptedTermsAt = pending.acceptedTermsAt;
+  if(pending.acceptedPrivacyAt) profile().acceptedPrivacyAt = pending.acceptedPrivacyAt;
+  markLegalAcceptance(profile());
+
   state.pendingEmailVerification = null;
   state.onboardingDone = true;
   state.entryMode = 'account';
   save();
-  try{ await upsertCloudProfile(profile().name || user.user_metadata?.display_name || 'Usuário'); }catch(e){ console.warn('profile upsert failed', e); }
+  try{ await upsertCloudProfile(profile().name || user.user_metadata?.display_name || 'Usuário', signupInfo); }catch(e){ console.warn('profile upsert failed', e); }
   try{ await loadLatestPlanFromCloud(); }catch(e){ console.warn('plan load failed', e); }
   save();
   return true;
@@ -698,6 +732,10 @@ async function onboardingSignup(){
 
   applyProfileInfo(info);
   markLegalAcceptance();
+  const legalInfo = {
+    acceptedTermsAt: profile().acceptedTermsAt || nowISO(),
+    acceptedPrivacyAt: profile().acceptedPrivacyAt || nowISO()
+  };
   save();
 
   const { data, error } = await supabaseClient.auth.signUp({
@@ -706,14 +744,20 @@ async function onboardingSignup(){
     options:{
       data:{
         display_name:info.name,
+        name:info.name,
         sex:info.sex,
         age:info.age,
         height:info.height,
         weight:info.weight,
+        initial_weight:info.weight,
         goal:info.goal,
         focus:info.focus,
         experience:info.experience,
-        daysPerWeek:info.daysPerWeek
+        daysPerWeek:info.daysPerWeek,
+        days_per_week:info.daysPerWeek,
+        notes:info.notes || '',
+        accepted_terms_at:legalInfo.acceptedTermsAt,
+        accepted_privacy_at:legalInfo.acceptedPrivacyAt
       },
       emailRedirectTo: window.location.origin + window.location.pathname
     }
@@ -732,7 +776,7 @@ async function onboardingSignup(){
     // Conta foi criada no Supabase, mas só será ativada no app após confirmação.
     await supabaseClient.auth.signOut().catch(()=>{});
     cloudUser = null;
-    setPendingEmailVerification(email);
+    setPendingEmailVerification(email, info, legalInfo);
     toast('Enviamos um link. Confirme seu e-mail para ativar sua conta.');
   }
   render();
@@ -1228,11 +1272,28 @@ async function cloudLogout(){
   cloudUser=null;
   toast('Você saiu da conta.'); render();
 }
-async function upsertCloudProfile(name){
+async function upsertCloudProfile(name, sourceInfo=null){
   const user=await getCurrentCloudUser();
   if(!user) return;
   const p=profile();
-  await supabaseClient.from('profiles').upsert({id:user.id, name:name || p.name || 'Usuário', sex:p.sex || null, age:parseNumberValue(p.age), height:parseNumberValue(p.height), initial_weight:parseNumberValue(p.weight), goal:p.goal || null, focus:p.focus || null, notes:p.notes || null, experience:p.experience || null, days_per_week:parseNumberValue(p.daysPerWeek), accepted_terms_at:p.acceptedTermsAt || null, accepted_privacy_at:p.acceptedPrivacyAt || null});
+  const info = sourceInfo || {};
+  const row = {
+    id:user.id,
+    name:name || p.name || info.name || user.user_metadata?.display_name || 'Usuário',
+    sex:p.sex || info.sex || user.user_metadata?.sex || null,
+    age:parseNumberValue(p.age || info.age || user.user_metadata?.age),
+    height:parseNumberValue(p.height || info.height || user.user_metadata?.height),
+    initial_weight:parseNumberValue(p.weight || info.weight || user.user_metadata?.weight || user.user_metadata?.initial_weight),
+    goal:p.goal || info.goal || user.user_metadata?.goal || null,
+    focus:p.focus || info.focus || user.user_metadata?.focus || null,
+    notes:p.notes || info.notes || user.user_metadata?.notes || null,
+    experience:p.experience || info.experience || user.user_metadata?.experience || 'Iniciante',
+    days_per_week:parseNumberValue(p.daysPerWeek || info.daysPerWeek || user.user_metadata?.daysPerWeek || user.user_metadata?.days_per_week || 5),
+    accepted_terms_at:p.acceptedTermsAt || user.user_metadata?.accepted_terms_at || nowISO(),
+    accepted_privacy_at:p.acceptedPrivacyAt || user.user_metadata?.accepted_privacy_at || nowISO()
+  };
+  const { error } = await supabaseClient.from('profiles').upsert(row, { onConflict:'id' });
+  if(error) throw error;
 }
 
 function serializeCurrentPlan(p=profile()){

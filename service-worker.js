@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gym-bronze-v5-7-4-auth-cloud';
+const CACHE_NAME = 'gym-bronze-v5-7-5-auth-profile';
 const ASSETS = [
   './',
   './index.html',
