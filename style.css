@@ -554,3 +554,13 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
 .coach-grid .quick-item{
   min-height:90px;
 }
+
+/* v6.9 — Versões temporárias do treino */
+.variant-preview{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.variant-badge{
+  border-color:rgba(255,122,0,.35);
+}
