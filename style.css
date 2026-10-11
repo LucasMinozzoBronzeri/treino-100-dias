@@ -218,3 +218,7 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
   .brand-logo{width:40px;height:40px}
   h1{font-size:23px}
 }
+
+/* v6.1 — campos por tipo de exercício e perfis por conta */
+.cardio-controls .field label{color:#ffdca8}
+.exercise .small{text-transform:none}

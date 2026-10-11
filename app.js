@@ -598,7 +598,7 @@ async function getCurrentCloudUser(){
 }
 function isLocalMode(){ return state.entryMode === 'local'; }
 function isAnonymousCloudUser(){ return !!(cloudUser?.is_anonymous || cloudUser?.app_metadata?.provider === 'anonymous' || isLocalMode()); }
-function hasCloudAccount(){ return !!(cloudUser && !isAnonymousCloudUser() && state.entryMode === 'account'); }
+function hasCloudAccount(){ const p=profile(); return !!(cloudUser && !isAnonymousCloudUser() && state.entryMode === 'account' && (!p.cloudUserId || p.cloudUserId === cloudUser.id)); }
 function cloudStatusHTML(){
   if(!cloudReady) return '<span class="badge red">indisponível</span>';
   if(hasCloudAccount()) return '<span class="badge green">conectado</span>';
@@ -852,32 +852,69 @@ function setPendingEmailVerification(email, profileInfo=null, legalInfo=null){
   onboardingView = 'verify';
   save();
 }
+async function fetchCloudProfileInfo(user){
+  if(!supabaseClient || !user?.id) return null;
+  try{
+    const { data, error } = await supabaseClient.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    if(error || !data) return null;
+    return {
+      name:data.name || user.email?.split('@')[0] || '',
+      age:data.age || '',
+      sex:data.sex || '',
+      height:data.height || '',
+      weight:data.initial_weight || '',
+      goal:data.goal || '',
+      focus:data.focus || '',
+      experience:data.experience || 'Iniciante',
+      daysPerWeek:String(data.days_per_week || 5),
+      notes:data.notes || ''
+    };
+  }catch(e){ return null; }
+}
+function findLocalProfileForCloudUser(user){
+  if(!user) return null;
+  return state.profiles.find(p=>p.cloudUserId===user.id || (p.accountEmail && user.email && String(p.accountEmail).toLowerCase()===String(user.email).toLowerCase())) || null;
+}
+function prepareAccountProfile(user, info={}){
+  let p=findLocalProfileForCloudUser(user);
+  if(!p){
+    p=newProfile(info?.name || user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Novo usuário');
+    p.cloudUserId=user.id;
+    p.accountEmail=user.email || '';
+    state.profiles.push(p);
+  }
+  state.activeProfileId=p.id;
+  p.cloudUserId=user.id;
+  p.accountEmail=user.email || p.accountEmail || '';
+  // Só aplica os dados cadastrais neste perfil da conta, nunca no perfil ativo antigo.
+  if(info && info.name) applyProfileInfo(info, p);
+  ensureProfile(p);
+  return p;
+}
 async function completeVerifiedAccountSession(){
   const user = await getCurrentCloudUser();
   if(!user || isAnonymousCloudUser()) return false;
-  // Em conta real, só libera quando o e-mail está confirmado.
   const confirmed = !!(user.email_confirmed_at || user.confirmed_at);
   if(!confirmed){
     setPendingEmailVerification(user.email || state.pendingEmailVerification?.email || '');
     return false;
   }
 
-  // Recupera os dados completos preenchidos no cadastro.
-  // Prioridade: dados pendentes no navegador; fallback: metadata do Supabase.
   const pending = state.pendingEmailVerification || {};
-  const signupInfo = pending.profileInfo || normalizeProfileInfoFromUser(user);
-  if(signupInfo && signupInfo.name){
-    applyProfileInfo(signupInfo, profile());
-  }
-  if(pending.acceptedTermsAt) profile().acceptedTermsAt = pending.acceptedTermsAt;
-  if(pending.acceptedPrivacyAt) profile().acceptedPrivacyAt = pending.acceptedPrivacyAt;
-  markLegalAcceptance(profile());
+  const cloudInfo = await fetchCloudProfileInfo(user);
+  const signupInfo = pending.profileInfo || cloudInfo || normalizeProfileInfoFromUser(user);
+  const accountProfile = prepareAccountProfile(user, signupInfo);
+
+  if(pending.acceptedTermsAt) accountProfile.acceptedTermsAt = pending.acceptedTermsAt;
+  if(pending.acceptedPrivacyAt) accountProfile.acceptedPrivacyAt = pending.acceptedPrivacyAt;
+  markLegalAcceptance(accountProfile);
 
   state.pendingEmailVerification = null;
   state.onboardingDone = true;
   state.entryMode = 'account';
   save();
-  try{ await upsertCloudProfile(profile().name || user.user_metadata?.display_name || 'Usuário', signupInfo); }catch(e){ console.warn('profile upsert failed', e); }
+
+  try{ await upsertCloudProfile(accountProfile.name || user.user_metadata?.display_name || 'Usuário', signupInfo); }catch(e){ console.warn('profile upsert failed', e); }
   try{ await loadLatestPlanFromCloud(); }catch(e){ console.warn('plan load failed', e); }
   try{ await loadLatestDietPlanFromCloud(); }catch(e){ console.warn('diet load failed', e); }
   try{ await syncXpEventsToCloud({silent:true}); await loadXpFromCloud({silent:true}); }catch(e){ console.warn('xp sync/load failed', e); }
@@ -1321,27 +1358,60 @@ function createProfileFlow(){ const name=prompt('Nome do novo perfil:'); if(!nam
 function resetProfileFlow(){ const p=profile(); if(!confirm(`Resetar TODO o perfil ${p.name || 'Perfil'}? Isso apaga treinos, cargas, histórico, check-ins e bioimpedância.`)) return; const t=prompt('Digite RESETAR para confirmar:'); if(t!=='RESETAR') return toast('Reset cancelado.'); const fresh=newProfile(p.name); fresh.id=p.id; state.profiles[state.profiles.findIndex(x=>x.id===p.id)] = fresh; save(); render(); toast('Perfil resetado.'); }
 
 
+function exerciseKind(e){
+  if(exerciseIsCardio(e)) return 'cardio';
+  const s=String((e?.type||'')+' '+(e?.name||'')).toLowerCase();
+  if(/prancha|abdominal|core/.test(s)) return 'core';
+  if(/along|mobilidade|aquecimento/.test(s)) return 'mobility';
+  return 'strength';
+}
 function exerciseHTML(p,w,e,isCurrent){
   const done=!!p.tempDone[e.id];
   const status=p.tempStatus[e.id];
   const m=p.exerciseMeta[e.id] || {};
   const weight=p.weights[e.id] || '';
   const locked=!isCurrent;
-  return `<div class="exercise ${done?'done':''} ${status==='skipped'?'skipped':''}" data-exercise-card="${e.id}">
-    <div class="exercise-top">
-      <div><h4>${esc(e.name)}</h4><div class="small">${esc(e.type||'exercício')} • meta ${esc(e.target||'4x12')}</div></div>
-      <span class="badge ${done?'green':status==='skipped'?'yellow':''}">${done?'Concluído':status==='skipped'?'Pulado':isCurrent?'Pendente':'Consulta'}</span>
-    </div>
-    <div class="exercise-controls">
-      <div class="field"><label>Carga atual</label><input class="input" data-weight="${e.id}" value="${esc(weight)}" placeholder="ex: 40 kg"></div>
-      <div class="field"><label>Próxima meta</label><input class="input" data-meta="targetWeight" data-ex-id="${e.id}" value="${esc(m.targetWeight||'')}" placeholder="ex: 45 kg"></div>
+  const kind=exerciseKind(e);
+  const commonTail = `
       <div class="field"><label>Dificuldade</label><select class="select" data-meta="difficulty" data-ex-id="${e.id}">
         ${['','Fácil','Boa','Pesada','Muito pesada'].map(x=>`<option ${m.difficulty===x?'selected':''}>${x}</option>`).join('')}
       </select></div>
       <div class="field"><label>Dor/desconforto</label><select class="select" data-meta="pain" data-ex-id="${e.id}">
         ${['','Não','Leve','Média','Forte'].map(x=>`<option ${m.pain===x?'selected':''}>${x}</option>`).join('')}
       </select></div>
-      <div class="field full-field"><label>Observação</label><input class="input" data-meta="note" data-ex-id="${e.id}" value="${esc(m.note||'')}" placeholder="ex: pé doeu, ajustar postura..."></div>
+      <div class="field full-field"><label>Observação</label><input class="input" data-meta="note" data-ex-id="${e.id}" value="${esc(m.note||'')}" placeholder="ex: cansei muito, dor no pé, ajustar ritmo..."></div>`;
+  const strengthFields = `
+      <div class="field"><label>Carga atual</label><input class="input" data-weight="${e.id}" value="${esc(weight)}" placeholder="ex: 40 kg"></div>
+      <div class="field"><label>Próxima meta</label><input class="input" data-meta="targetWeight" data-ex-id="${e.id}" value="${esc(m.targetWeight||'')}" placeholder="ex: 45 kg"></div>
+      ${commonTail}`;
+  const cardioFields = `
+      <div class="field"><label>Tempo feito</label><input class="input" data-meta="cardioTime" data-ex-id="${e.id}" value="${esc(m.cardioTime||'')}" placeholder="ex: 20 min"></div>
+      <div class="field"><label>Meta de tempo</label><input class="input" data-meta="cardioTarget" data-ex-id="${e.id}" value="${esc(m.cardioTarget||e.target||'')}" placeholder="ex: 25 min"></div>
+      <div class="field"><label>Intensidade</label><select class="select" data-meta="cardioIntensity" data-ex-id="${e.id}">
+        ${['','Leve','Moderado','Forte','HIIT'].map(x=>`<option ${m.cardioIntensity===x?'selected':''}>${x}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Cansaço</label><select class="select" data-meta="fatigue" data-ex-id="${e.id}">
+        ${['','Baixo','Médio','Alto','Muito alto'].map(x=>`<option ${m.fatigue===x?'selected':''}>${x}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Distância opcional</label><input class="input" data-meta="distance" data-ex-id="${e.id}" value="${esc(m.distance||'')}" placeholder="ex: 2,5 km"></div>
+      ${commonTail}`;
+  const coreFields = `
+      <div class="field"><label>Tempo/reps feitos</label><input class="input" data-meta="coreDone" data-ex-id="${e.id}" value="${esc(m.coreDone||'')}" placeholder="ex: 3x30s ou 3x15"></div>
+      <div class="field"><label>Próxima meta</label><input class="input" data-meta="coreTarget" data-ex-id="${e.id}" value="${esc(m.coreTarget||e.target||'')}" placeholder="ex: 3x40s"></div>
+      ${commonTail}`;
+  const mobilityFields = `
+      <div class="field"><label>Tempo feito</label><input class="input" data-meta="mobilityTime" data-ex-id="${e.id}" value="${esc(m.mobilityTime||'')}" placeholder="ex: 8 min"></div>
+      <div class="field"><label>Região</label><input class="input" data-meta="mobilityArea" data-ex-id="${e.id}" value="${esc(m.mobilityArea||'')}" placeholder="ex: ombro, quadril..."></div>
+      ${commonTail}`;
+  const fields = kind==='cardio' ? cardioFields : kind==='core' ? coreFields : kind==='mobility' ? mobilityFields : strengthFields;
+  const kindLabel = kind==='cardio' ? 'cardio' : kind==='core' ? 'core' : kind==='mobility' ? 'mobilidade' : (e.type||'força');
+  return `<div class="exercise ${done?'done':''} ${status==='skipped'?'skipped':''}" data-exercise-card="${e.id}">
+    <div class="exercise-top">
+      <div><h4>${esc(e.name)}</h4><div class="small">${esc(kindLabel)} • meta ${esc(e.target||'4x12')}</div></div>
+      <span class="badge ${done?'green':status==='skipped'?'yellow':''}">${done?'Concluído':status==='skipped'?'Pulado':isCurrent?'Pendente':'Consulta'}</span>
+    </div>
+    <div class="exercise-controls ${kind==='cardio'?'cardio-controls':''}">
+      ${fields}
     </div>
     <div class="actions">
       <button class="btn sm green" ${locked?'disabled':''} data-toggle-ex="${e.id}">${done?'Desmarcar':'Concluir'}</button>
@@ -1811,7 +1881,7 @@ async function saveWorkoutToCloud(p, h, opts={}){
         sets:parseNumberValue(h.meta?.[e.id]?.sets),
         difficulty:h.meta?.[e.id]?.difficulty || null,
         pain:h.meta?.[e.id]?.pain || null,
-        notes:h.meta?.[e.id]?.notes || null,
+        notes:h.meta?.[e.id]?.note || h.meta?.[e.id]?.cardioTime || h.meta?.[e.id]?.coreDone || null,
         skipped:h.status?.[e.id]==='skipped',
         completed:h.status?.[e.id]==='done'
       }));
