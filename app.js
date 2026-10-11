@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.0.3';
+const APP_VERSION = '7.0.4';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';

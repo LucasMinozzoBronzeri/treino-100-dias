@@ -866,3 +866,100 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
     gap:6px;
   }
 }
+
+/* v7.0.4 — Perfil volta para o topo no mobile */
+@media (max-width:620px){
+  .topbar{
+    grid-template-columns:auto minmax(0,1fr) auto;
+    grid-template-rows:auto auto;
+    align-items:start;
+    gap:8px 8px;
+  }
+  .quick-menu-btn{
+    grid-column:1;
+    grid-row:1;
+    align-self:start;
+    margin-top:0;
+  }
+  .brand-wrap{
+    grid-column:2;
+    grid-row:1;
+    align-self:start;
+    min-width:0;
+  }
+  .profile-pill{
+    grid-column:3;
+    grid-row:1;
+    align-self:start;
+    justify-self:end;
+    margin-top:0;
+    max-width:168px;
+    padding:7px 10px;
+  }
+  .profile-pill span:last-child{
+    max-width:102px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .avatar-dot{
+    width:30px;
+    height:30px;
+    flex:0 0 auto;
+  }
+  .level-pill{
+    grid-column:2 / 4;
+    grid-row:2;
+    justify-self:end;
+    align-self:start;
+    max-width:100%;
+    width:auto;
+    margin-top:2px;
+  }
+}
+@media (max-width:430px){
+  .topbar{
+    gap:7px 7px;
+  }
+  .brand-logo{
+    width:42px;
+    height:42px;
+  }
+  .brand-wrap{
+    gap:9px;
+  }
+  .eyebrow{
+    font-size:11px;
+    letter-spacing:.14em;
+  }
+  h1{
+    font-size:28px;
+  }
+  .profile-pill{
+    max-width:148px;
+    padding:6px 8px;
+  }
+  .profile-pill span:last-child{
+    max-width:86px;
+    font-size:12px;
+  }
+  .avatar-dot{
+    width:28px;
+    height:28px;
+  }
+}
+@media (max-width:380px){
+  .profile-pill{
+    max-width:128px;
+  }
+  .profile-pill span:last-child{
+    max-width:66px;
+  }
+  h1{
+    font-size:25px;
+  }
+  .brand-logo{
+    width:38px;
+    height:38px;
+  }
+}
