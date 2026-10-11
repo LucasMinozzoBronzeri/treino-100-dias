@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '6.9.0';
+const APP_VERSION = '7.0.0';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -512,6 +512,66 @@ function variantRules(mode){
   if(mode==='light') return ['Reduza carga e foque técnica.', 'Evite falha muscular.', 'Use como recuperação ativa.'];
   return ['Treino original completo.'];
 }
+function openTodayWorkoutCenter(){
+  const p=profile();
+  const w=currentWorkout(p);
+  const adj=currentAdjustment(p);
+  const variant=currentVariant(p);
+  const readiness=dailyCheckinToday(p);
+  const readinessText=readiness ? `${readinessLabel(readiness)} • ${readiness.readinessScore}%` : 'sem check-in hoje';
+  const layer=byId('modalLayer');
+  layer.innerHTML=`<div class="modal quick-modal today-workout-center"><div class="modal-head"><div><p class="eyebrow">Treino de hoje</p><h2>${w?esc(w.id+' — '+w.name):'Nenhum treino ativo'}</h2><p class="muted">Escolha como você vai treinar hoje. Ajustes e versões são temporários e não alteram seu treino fixo.</p></div><button class="close" data-close>×</button></div>
+    ${w?`<section class="today-center-status">
+      <div class="status-chip"><strong>Prontidão</strong><span>${esc(readinessText)}</span></div>
+      <div class="status-chip"><strong>Versão</strong><span>${variant?esc(variant.title||variant.tag):'Completo'}</span></div>
+      <div class="status-chip"><strong>Ajuste</strong><span>${adj?esc(adj.title||adj.tag):'Nenhum'}</span></div>
+    </section>`:'<div class="empty">Gere um treino primeiro para usar a central do treino de hoje.</div>'}
+    <section class="today-center-block">
+      <div class="card-title"><div><h3>Começar</h3><p>Entre direto no treino ou edite o treino fixo.</p></div></div>
+      <div class="actions"><button class="btn" data-center-action="start" ${w?'':'disabled'}>Iniciar treino de hoje</button><button class="btn secondary" data-center-action="edit" ${w?'':'disabled'}>Editar treino fixo</button></div>
+    </section>
+    <section class="today-center-block">
+      <div class="card-title"><div><h3>Escolher versão de hoje</h3><p>Versões mudam a lista de exercícios só para hoje.</p></div></div>
+      <div class="quick-grid coach-grid">${Object.entries(WORKOUT_VARIANTS).map(([key,item])=>`<button class="quick-item ${variant?.mode===key || (!variant&&key==='full')?'active':''}" data-center-variant="${key}" ${w?'':'disabled'}><b>${item.icon}</b><span><strong>${item.title}</strong><small>${item.desc}</small></span></button>`).join('')}</div>
+    </section>
+    <section class="today-center-block">
+      <div class="card-title"><div><h3>Ajustar situação de hoje</h3><p>Ajustes orientam estratégia, prioridade e cuidado.</p></div></div>
+      <div class="quick-grid coach-grid">${Object.entries(QUICK_COACH_MODES).map(([key,item])=>`<button class="quick-item ${adj?.mode===key?'active':''}" data-center-coach="${key}" ${w?'':'disabled'}><b>${item.icon}</b><span><strong>${item.title}</strong><small>${item.desc}</small></span></button>`).join('')}</div>
+    </section>
+    <p class="muted">Na próxima vez que esse treino aparecer, ele volta ao formato normal, a menos que você escolha uma nova versão naquele dia.</p>
+  </div>`;
+  layer.classList.remove('hidden');
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
+  document.querySelectorAll('[data-center-action]').forEach(b=>b.onclick=()=>{
+    const action=b.dataset.centerAction;
+    if(action==='start'){ closeModal(); openWorkout(w.id); }
+    if(action==='edit'){ closeModal(); openEditWorkout(w.id); }
+  });
+  document.querySelectorAll('[data-center-variant]').forEach(b=>b.onclick=()=>applyWorkoutVariantFromCenter(b.dataset.centerVariant));
+  document.querySelectorAll('[data-center-coach]').forEach(b=>b.onclick=()=>applyQuickCoachFromCenter(b.dataset.centerCoach));
+}
+function applyWorkoutVariantFromCenter(mode){
+  const p=profile();
+  const w=currentWorkout(p);
+  if(!w) return toast('Gere um treino primeiro.');
+  if(mode==='full') p.activeWorkoutVariant=null;
+  else p.activeWorkoutVariant={id:'wv_'+Date.now(), date:nowISO(), dateKey:dateKey(), workoutId:w.id, mode, title:workoutVariantInfo(mode).title, tag:workoutVariantInfo(mode).tag};
+  save();
+  openTodayWorkoutCenter();
+  toast(mode==='full'?'Treino completo selecionado para hoje.':'Versão de hoje aplicada.');
+}
+function applyQuickCoachFromCenter(mode){
+  const p=profile();
+  const w=currentWorkout(p);
+  if(!w) return toast('Gere um treino primeiro.');
+  const plan=quickCoachPlan(mode,p);
+  const adj={id:'qa_'+Date.now(), date:nowISO(), dateKey:dateKey(), workoutId:w.id, mode, title:plan.info.title, tag:plan.info.tag, focusExerciseIds:plan.focus.map(e=>e.id), notes:plan.instructions};
+  p.activeWorkoutAdjustment=adj;
+  p.quickCoachLogs.push(adj);
+  save();
+  openTodayWorkoutCenter();
+  toast('Ajuste de hoje aplicado.');
+}
 function openWorkoutVariantModal(mode=null){
   const p=profile();
   const w=currentWorkout(p);
@@ -767,7 +827,7 @@ function todayMissionHTML(p=profile()){
       <p class="eyebrow">Hoje</p>
       <h2>${esc(missionTitle)}</h2>
       <p>${esc(missionText)}</p>
-      <div class="today-actions">${done?'<button class="btn secondary" data-screen-go="progress">Ver progresso</button>':hasPlan?`<button class="btn" data-action="start-current">Iniciar ${w.id}</button>`:`<button class="btn" data-action="generate-initial-plan">Gerar treino</button>`}<button class="btn secondary" data-action="workout-variants">Versões</button><button class="btn secondary" data-action="quick-coach">Ajustar hoje</button><button class="btn secondary" data-action="daily-checkin">${daily?'Editar check-in':'Check-in rápido'}</button><button class="btn secondary" data-action="open-levels">Nv. ${levelInfo.roman}</button></div>
+      <div class="today-actions">${done?'<button class="btn secondary" data-screen-go="progress">Ver progresso</button>':hasPlan?`<button class="btn" data-action="start-current">Iniciar ${w.id}</button>`:`<button class="btn" data-action="generate-initial-plan">Gerar treino</button>`}<button class="btn secondary" data-action="today-workout-center">Ajuste treino hoje</button><button class="btn secondary" data-action="daily-checkin">${daily?'Editar check-in':'Check-in rápido'}</button><button class="btn secondary" data-action="open-levels">Nv. ${levelInfo.roman}</button></div>
     </div>
     <div class="today-score" data-action="open-score">
       <div class="progress-ring small-ring" style="--p:${score}%"><div class="progress-ring-inner">${score}<small>score</small></div></div>
@@ -1726,7 +1786,7 @@ function renderHome(){
 }
 function pendingHTML(p){ return ''; }
 function workoutQueueCard(p,id,current=false){ const w=workoutById(p,id); if(!w) return ''; return `<div class="workout-card ${current?'current':''}" data-open-workout="${id}"><div class="workout-left"><div class="letter">${id}</div><div class="workout-name"><strong>${esc(w.name)}</strong><span>${current?'Liberado para concluir':'Modo consulta'} • ${w.exercises.length} exercícios</span></div></div><span class="badge ${current?'orange':''}">${current?'Atual':'Bloqueado'}</span></div>`; }
-function renderWorkouts(){ const p=profile(); if(!hasWorkoutPlan(p)) return `<section class="card"><div class="card-title"><div><h3>Nenhum treino ativo</h3><p>Gere um treino específico ou use o treino padrão para começar.</p></div></div><div class="actions"><button class="btn" data-action="generate-initial-plan">Gerar treino específico</button><button class="btn secondary" data-action="use-default-plan">Usar treino padrão</button></div></section>`; return `<section class="card"><div class="card-title"><div><h3>Treinos</h3><p>Você pode abrir todos, mas só conclui o treino da ordem.</p></div><div class="actions inline-actions"><button class="btn sm" data-action="workout-variants">Versões</button><button class="btn sm secondary" data-action="quick-coach">Ajuste rápido</button><button class="btn sm secondary" data-action="edit-current-workout">Editar atual</button></div></div><div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div></section><section class="card pro-tip"><div><span class="badge orange">PRO</span><h3>Editor liberado</h3><p>Agora você pode editar exercícios, ordem, nome, tipo e meta de reps direto no app.</p></div></section>`; }
+function renderWorkouts(){ const p=profile(); if(!hasWorkoutPlan(p)) return `<section class="card"><div class="card-title"><div><h3>Nenhum treino ativo</h3><p>Gere um treino específico ou use o treino padrão para começar.</p></div></div><div class="actions"><button class="btn" data-action="generate-initial-plan">Gerar treino específico</button><button class="btn secondary" data-action="use-default-plan">Usar treino padrão</button></div></section>`; return `<section class="card"><div class="card-title"><div><h3>Treinos</h3><p>Você pode abrir todos, mas só conclui o treino da ordem.</p></div><div class="actions inline-actions"><button class="btn sm" data-action="today-workout-center">Treino de hoje</button><button class="btn sm secondary" data-action="edit-current-workout">Editar fixo</button></div></div><div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div></section><section class="card pro-tip"><div><span class="badge orange">PRO</span><h3>Editor liberado</h3><p>Agora você pode editar exercícios, ordem, nome, tipo e meta de reps direto no app.</p></div></section>`; }
 
 function renderProgress(){
   const p=profile(); const gains = exerciseGains(p); const cycles=currentCycleNumber(p); const levelInfo=levelFromXp(ensureGamification(p).xp);
@@ -1919,6 +1979,7 @@ function handleAction(a){
   if(a==='reset-nutrition-today') resetNutritionToday();
   if(a==='open-quick-menu') openQuickMenuModal();
   if(a==='open-score') openScoreModal();
+  if(a==='today-workout-center') openTodayWorkoutCenter();
   if(a==='quick-coach') openQuickCoachModal();
   if(a==='workout-variants') openWorkoutVariantModal();
   if(a==='open-levels') openLevelModal();
@@ -2043,7 +2104,7 @@ function openWorkout(id){
   const variant=currentVariant(p);
   const dayExercises=workoutExercisesForToday(w,p);
   layer.innerHTML = `<div class="modal"><div class="modal-head"><div><p class="eyebrow">${isCurrent?'Treino liberado':'Modo consulta'}</p><h2>${w.id} — ${esc(w.name)}</h2><p class="muted">${isCurrent?'Você pode concluir exercícios e finalizar.':'Você pode consultar cargas, mas não concluir fora da ordem.'}</p></div><button class="close" data-close>×</button></div>
-  <div class="actions modal-actions-top"><button class="btn sm" data-open-variant>Versões</button><button class="btn sm" data-open-quick-coach>Ajuste rápido</button><button class="btn sm secondary" data-edit-workout="${w.id}">Editar treino</button><button class="btn sm secondary" data-close>Fechar</button></div>
+  <div class="actions modal-actions-top"><button class="btn sm" data-open-today-center>Ajuste treino hoje</button><button class="btn sm secondary" data-edit-workout="${w.id}">Editar treino</button><button class="btn sm secondary" data-close>Fechar</button></div>
   ${variant?`<section class="card quick-active-card"><div class="card-title"><div><h3>${esc(variant.tag || 'Versão ativa')}</h3><p>${esc(variant.title || '')} • vale só hoje</p></div><span class="badge orange">Temporário</span></div><p class="muted">O treino original permanece salvo. Na próxima vez, ele volta normal.</p></section>`:''}
   ${adj?`<section class="card quick-active-card"><div class="card-title"><div><h3>${esc(adj.tag || 'Ajuste ativo')}</h3><p>${esc(adj.title || '')} • aplicado às ${fmtTime(adj.date)}</p></div><span class="badge orange">Hoje</span></div><p class="muted">${esc((adj.notes||[]).slice(0,2).join(' '))}</p></section>`:''}
   ${dayExercises.map(e=>exerciseHTML(p,w,e,isCurrent)).join('')}
@@ -2061,6 +2122,7 @@ function wireWorkoutModal(){
   document.querySelectorAll('[data-edit-workout]').forEach(b=>b.onclick=()=>openEditWorkout(b.dataset.editWorkout));
   document.querySelectorAll('[data-open-quick-coach]').forEach(b=>b.onclick=()=>openQuickCoachModal());
   document.querySelectorAll('[data-open-variant]').forEach(b=>b.onclick=()=>openWorkoutVariantModal());
+  document.querySelectorAll('[data-open-today-center]').forEach(b=>b.onclick=()=>openTodayWorkoutCenter());
 }
 
 function openEditWorkout(id){
@@ -2137,13 +2199,13 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
   const finishedAt = nowISO();
   const durationMinutes = Math.max(0, Math.round((new Date(finishedAt)-new Date(startedAt))/60000));
   const score = Math.max(0, Math.round(((doneCount + skippedCount*.35) / Math.max(1, dayExercises.length)) * 100));
-  const record = {id:'h_'+Date.now(), date:finishedAt, startedAt, finishedAt, durationMinutes, workoutId:id, workoutName:w.name, workoutVariant:variant, doneCount, skippedCount, score, weights, status, meta:metaSnap};
+  const record = {id:'h_'+Date.now(), date:finishedAt, startedAt, finishedAt, durationMinutes, workoutId:id, workoutName:w.name, workoutVariant:variant, workoutAdjustment:currentAdjustment(p), doneCount, skippedCount, score, weights, status, meta:metaSnap};
   const xpInfo = awardWorkoutXP(p,w,record);
   if(aiConfigured(p) && p.ai.autoWorkoutReport && canUseOnlineAI()) record.aiReportStatus='pending';
   else if(p.ai.autoWorkoutReport && isOffline()) record.aiReportError='IA pausada: você estava offline.';
   else if(p.ai.autoWorkoutReport && !cloudUser) record.aiReportError='IA pausada: entre na conta para gerar relatório.';
   p.history.push(record);
-  p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={}; p.tempTimes={}; p.activeWorkoutSession=null; p.activeWorkoutVariant=null;
+  p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={}; p.tempTimes={}; p.activeWorkoutSession=null; p.activeWorkoutVariant=null; p.activeWorkoutAdjustment=null;
   save(); closeModal(); toast(record.aiReportStatus==='pending' ? levelUpToast(xpInfo)+' Gerando relatório com IA...' : (isOffline() ? levelUpToast(xpInfo)+' Salvo offline neste aparelho.' : levelUpToast(xpInfo)));
   if(record.aiReportStatus==='pending') generateWorkoutAIReport(p.id, record.id);
   else saveWorkoutToCloud(p, record, {silent:true});
@@ -2164,7 +2226,7 @@ function openQuickMenuModal(){
   layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Menu rápido</p><h2>Gym Bronze</h2><p class="muted">Atalhos para as áreas principais e ações rápidas.</p></div><button class="close" data-close>×</button></div>
     <div class="quick-grid">${items.map(([screenKey,icon,title,desc])=>`<button class="quick-item" data-quick-screen="${screenKey}"><b>${icon}</b><span><strong>${title}</strong><small>${desc}</small></span></button>`).join('')}</div>
     <div class="divider"></div>
-    <div class="actions"><button class="btn" data-quick-action="open-score">Score do dia</button><button class="btn secondary" data-quick-action="workout-variants">Versões</button><button class="btn secondary" data-quick-action="quick-coach">Ajuste rápido</button><button class="btn secondary" data-quick-action="daily-checkin">Check-in rápido</button><button class="btn secondary" data-quick-action="account-switch">Alternar conta</button>${p.dietPlan?'<button class="btn secondary" data-quick-action="nutrition-checklist">Checklist nutri</button>':'<button class="btn secondary" data-quick-action="generate-diet-plan">Gerar nutri</button>'}</div>
+    <div class="actions"><button class="btn" data-quick-action="open-score">Score do dia</button><button class="btn secondary" data-quick-action="today-workout-center">Treino de hoje</button><button class="btn secondary" data-quick-action="daily-checkin">Check-in rápido</button><button class="btn secondary" data-quick-action="account-switch">Alternar conta</button>${p.dietPlan?'<button class="btn secondary" data-quick-action="nutrition-checklist">Checklist nutri</button>':'<button class="btn secondary" data-quick-action="generate-diet-plan">Gerar nutri</button>'}</div>
     <p class="muted">v${APP_VERSION}</p>
   </div>`;
   layer.classList.remove('hidden');
@@ -2273,7 +2335,7 @@ function buildWorkoutAIPayload(p, h){
     previousSameWorkout:previousSame,
     latestBio:p.bio?.slice(-1)[0] || null,
     todayReadiness:dailyCheckinToday(p),
-    activeWorkoutAdjustment:currentAdjustment(p),
+    activeWorkoutAdjustment:h.workoutAdjustment || currentAdjustment(p),
     workoutVariant:h.workoutVariant || null,
     recentDailyCheckins:recentDailyCheckins(p,7),
     recentHistory:p.history.slice(-8).map(x=>({date:x.date, workoutId:x.workoutId, workoutName:x.workoutName, score:x.score, doneCount:x.doneCount, skippedCount:x.skippedCount}))

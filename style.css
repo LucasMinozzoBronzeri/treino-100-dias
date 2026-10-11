@@ -564,3 +564,33 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
 .variant-badge{
   border-color:rgba(255,122,0,.35);
 }
+
+/* v7.0 — Central Treino de Hoje */
+.today-workout-center .quick-item.active{
+  border-color:rgba(255,122,0,.55);
+  background:rgba(255,122,0,.12);
+}
+.today-center-status{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:10px;
+  margin-bottom:12px;
+}
+.status-chip{
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(20,20,22,.72);
+  border-radius:18px;
+  padding:12px;
+}
+.status-chip strong{display:block;font-size:13px}
+.status-chip span{display:block;color:var(--muted);font-size:12px;margin-top:4px}
+.today-center-block{
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(20,20,22,.48);
+  border-radius:22px;
+  padding:14px;
+  margin-top:12px;
+}
+@media (max-width:620px){
+  .today-center-status{grid-template-columns:1fr}
+}
