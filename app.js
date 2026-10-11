@@ -365,6 +365,136 @@ function awardWorkoutXP(p,w,record){
   record.levelAfter=after.level;
   return {total, breakdown, before, after};
 }
+function localXpEventFromRecord(record){
+  if(!record || !record.xpAwarded) return null;
+  return {
+    id: record.id,
+    type: 'workout',
+    date: record.date || nowISO(),
+    workoutId: record.workoutId || '',
+    workoutName: record.workoutName || '',
+    xp: Number(record.xpAwarded || 0),
+    breakdown: record.xpBreakdown || [],
+    levelBefore: record.levelBefore || null,
+    levelAfter: record.levelAfter || null,
+    cloudSynced: !!record.xpCloudSynced,
+    cloudId: record.xpCloudId || null
+  };
+}
+async function saveXpEventToCloud(event, workoutLogId=null, opts={}){
+  if(!event || !event.xp) return {ok:false, reason:'empty_event'};
+  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
+  const user=await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
+  try{
+    const payload={
+      user_id:user.id,
+      local_id:event.id,
+      event_type:event.type || 'workout',
+      xp:Number(event.xp || 0),
+      description:event.workoutName ? `Treino ${event.workoutName}` : 'Ganho de XP',
+      breakdown:event.breakdown || [],
+      workout_log_id:workoutLogId || null,
+      workout_local_id:event.workoutId || null,
+      workout_name:event.workoutName || null,
+      level_before:event.levelBefore || null,
+      level_after:event.levelAfter || null,
+      created_at:event.date || nowISO()
+    };
+    const { data, error } = await supabaseClient.from('xp_events')
+      .upsert(payload, {onConflict:'user_id,local_id'})
+      .select('id')
+      .single();
+    if(error) throw error;
+    event.cloudSynced=true;
+    event.cloudId=data?.id || event.cloudId || null;
+    return {ok:true, id:event.cloudId};
+  }catch(e){
+    console.warn('Erro ao salvar XP na nuvem:', e);
+    if(!opts.silent) toast('XP salvo localmente. Falha ao sincronizar com a nuvem.');
+    return {ok:false, error:e};
+  }
+}
+async function syncXpEventForRecord(p, record, workoutLogId=null){
+  if(!record?.xpAwarded) return {ok:false, reason:'no_xp'};
+  const g=ensureGamification(p);
+  let event=g.xpEvents.find(ev=>ev.id===record.id) || localXpEventFromRecord(record);
+  if(!event) return {ok:false, reason:'no_event'};
+  const result=await saveXpEventToCloud(event, workoutLogId, {silent:true});
+  if(result.ok){
+    record.xpCloudSynced=true;
+    record.xpCloudId=result.id;
+    event.cloudSynced=true;
+    event.cloudId=result.id;
+  }
+  return result;
+}
+async function syncXpEventsToCloud(opts={}){
+  const p=profile();
+  if(!hasCloudAccount()) return {ok:false, reason:'no_account'};
+  const g=ensureGamification(p);
+  let sent=0, skipped=0, failed=0;
+  for(const ev of g.xpEvents){
+    if(ev.cloudSynced){ skipped++; continue; }
+    const h=(p.history||[]).find(x=>x.id===ev.id);
+    const result=await saveXpEventToCloud(ev, h?.cloudWorkoutId || null, {silent:true});
+    if(result.ok){
+      sent++;
+      if(h){ h.xpCloudSynced=true; h.xpCloudId=result.id; }
+    } else failed++;
+  }
+  save();
+  if(!opts.silent) toast(`XP na nuvem: ${sent} enviado(s), ${skipped} já estavam, ${failed} falha(s).`);
+  return {ok: failed===0, sent, skipped, failed};
+}
+async function loadXpFromCloud(opts={}){
+  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
+  const user=await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
+  try{
+    const { data, error } = await supabaseClient.from('xp_events')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', {ascending:true});
+    if(error) throw error;
+    const p=profile();
+    const g=ensureGamification(p);
+    const byId=new Map((g.xpEvents||[]).map(ev=>[ev.id, ev]));
+    (data||[]).forEach(row=>{
+      const id=row.local_id || row.id;
+      const event={
+        id,
+        type:row.event_type || 'workout',
+        date:row.created_at,
+        workoutId:row.workout_local_id || '',
+        workoutName:row.workout_name || '',
+        xp:Number(row.xp || 0),
+        breakdown:Array.isArray(row.breakdown) ? row.breakdown : [],
+        levelBefore:row.level_before || null,
+        levelAfter:row.level_after || null,
+        cloudSynced:true,
+        cloudId:row.id
+      };
+      byId.set(id, {...(byId.get(id)||{}), ...event});
+      const h=(p.history||[]).find(x=>x.id===id);
+      if(h){
+        h.xpCloudSynced=true;
+        h.xpCloudId=row.id;
+      }
+    });
+    g.xpEvents=Array.from(byId.values()).sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+    g.xp=g.xpEvents.reduce((sum,ev)=>sum+Number(ev.xp||0),0);
+    const levelInfo=levelFromXp(g.xp);
+    g.lastLevelSeen=levelInfo.level;
+    save();
+    return {ok:true, loaded:(data||[]).length, xp:g.xp};
+  }catch(e){
+    console.warn('Erro ao carregar XP da nuvem:', e);
+    if(!opts.silent) toast('Não consegui carregar XP da nuvem agora.');
+    return {ok:false, error:e};
+  }
+}
+
 function levelHeaderHTML(p=profile()){
   const info=levelFromXp(ensureGamification(p).xp);
   return `<div class="level-card-mini"><div class="level-card-row"><div class="level-badge">${esc(info.rank.icon)}</div><div><strong>${esc(info.rank.name)}</strong><span>Nv. ${info.roman} • faltam ${info.toNext} XP</span></div></div><div class="xp-bar"><i style="width:${info.pct}%"></i></div></div>`;
@@ -409,6 +539,7 @@ function openLevelModal(){
     ${nextRank?`<section class="card compact-card"><div class="card-title"><h3>Próxima patente</h3><p>${roman(nextRank.from)} • ${esc(nextRank.name)} — desbloqueia no nível ${nextRank.from}</p></div></section>`:''}
     <section class="card compact-card"><div class="card-title"><h3>Como ganhar XP</h3><p>Treinos mais avançados valem mais. Bônus vêm de consistência.</p></div>
       <div class="xp-rules"><span>Iniciante +50</span><span>Intermediário +70</span><span>Avançado +90</span><span>Sem pular +15</span><span>Cardio +10</span></div>
+      ${hasCloudAccount()?'<div class="actions" style="margin-top:12px"><button class="btn sm secondary" data-action="sync-xp-cloud">Salvar XP na nuvem</button><button class="btn sm secondary" data-action="load-xp-cloud">Atualizar XP da nuvem</button></div>':'<p class="muted">Entre em uma conta confirmada para sincronizar XP na nuvem.</p>'}
     </section>
     <section class="card compact-card"><div class="card-title"><h3>Últimos ganhos</h3></div>${recent.length?recent.map(ev=>`<div class="history-row"><div><strong>+${ev.xp} XP</strong><span>${esc(ev.workoutName||'Treino')} • ${fmtDate(ev.date)}</span></div><span class="badge">Nv. ${roman(ev.levelAfter||info.level)}</span></div>`).join(''):'<div class="empty">Finalize um treino para começar a ganhar XP.</div>'}</section>
     <section class="card compact-card"><div class="card-title"><h3>Patentes</h3><p>De frango recém-matriculado a Mr. Gym Bronze.</p></div><div class="rank-list">${trail}</div></section>
@@ -749,6 +880,7 @@ async function completeVerifiedAccountSession(){
   try{ await upsertCloudProfile(profile().name || user.user_metadata?.display_name || 'Usuário', signupInfo); }catch(e){ console.warn('profile upsert failed', e); }
   try{ await loadLatestPlanFromCloud(); }catch(e){ console.warn('plan load failed', e); }
   try{ await loadLatestDietPlanFromCloud(); }catch(e){ console.warn('diet load failed', e); }
+  try{ await syncXpEventsToCloud({silent:true}); await loadXpFromCloud({silent:true}); }catch(e){ console.warn('xp sync/load failed', e); }
   save();
   return true;
 }
@@ -1105,7 +1237,7 @@ function historyRowHTML(h){
 }
 
 
-function renderProfile(){ const p=profile(); const ai=p.ai||{}; const levelInfo=levelFromXp(ensureGamification(p).xp); return `<section class="card profile-level-card"><div class="card-title"><div><p class="eyebrow">Warrior</p><h3>${esc(p.name || 'Meu perfil')}</h3><p>${esc(levelInfo.rank.name)} • Nv. ${levelInfo.roman} (${levelInfo.level})</p></div><div class="level-badge big">${esc(levelInfo.rank.icon)}</div></div><div class="xp-bar big"><i style="width:${levelInfo.pct}%"></i></div><p class="muted">${levelInfo.level>=100?'Mr. Gym Bronze desbloqueado.':'Faltam '+levelInfo.toNext+' XP para o próximo nível.'}</p><div class="actions"><button class="btn sm secondary" data-action="open-levels">Ver trilha de patentes</button></div></section><section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais. Se entrar na conta, salva também na nuvem.</p></div><div class="form-grid">
+function renderProfile(){ const p=profile(); const ai=p.ai||{}; const levelInfo=levelFromXp(ensureGamification(p).xp); return `<section class="card profile-level-card"><div class="card-title"><div><p class="eyebrow">Warrior</p><h3>${esc(p.name || 'Meu perfil')}</h3><p>${esc(levelInfo.rank.name)} • Nv. ${levelInfo.roman} (${levelInfo.level})</p></div><div class="level-badge big">${esc(levelInfo.rank.icon)}</div></div><div class="xp-bar big"><i style="width:${levelInfo.pct}%"></i></div><p class="muted">${levelInfo.level>=100?'Mr. Gym Bronze desbloqueado.':'Faltam '+levelInfo.toNext+' XP para o próximo nível.'} ${hasCloudAccount()?'XP sincronizável na nuvem.':'XP salvo neste aparelho.'}</p><div class="actions"><button class="btn sm secondary" data-action="open-levels">Ver trilha de patentes</button>${hasCloudAccount()?'<button class="btn sm secondary" data-action="sync-xp-cloud">Salvar XP na nuvem</button>':''}</div></section><section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais. Se entrar na conta, salva também na nuvem.</p></div><div class="form-grid">
   ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${selectHTML('sex','Sexo',p.sex,['Homem','Mulher','Outro/Prefiro não informar'])}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}${selectHTML('experience','Nível',p.experience,['Iniciante','Intermediário','Avançado'])}${selectHTML('daysPerWeek','Dias por semana',p.daysPerWeek,['2','3','4','5','6'], v=>v+' dias')}<div class="stat"><strong>${esc(p.programLabel || programLabelForProfile(p))}</strong><span>meta do programa</span></div>
   <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div></div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button><button class="btn secondary" data-action="new-profile">Novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
   <section class="card"><div class="card-title"><div><h3>Conta e sincronização</h3><p>Sem login o app continua funcionando só neste aparelho. Com login, salva também no Supabase.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}</section>
@@ -1161,6 +1293,8 @@ function handleAction(a){
   if(a==='finish-cycle-ai') finishCycleAndGeneratePlan();
   if(a==='generate-diet-plan') generateDietPlan();
   if(a==='open-levels') openLevelModal();
+  if(a==='sync-xp-cloud') syncXpEventsToCloud({silent:false}).then(()=>render());
+  if(a==='load-xp-cloud') loadXpFromCloud({silent:false}).then(r=>{ render(); toast(r?.ok?'XP carregado da nuvem.':'Não consegui carregar XP da nuvem.'); });
 }
 
 
@@ -1375,6 +1509,8 @@ async function refreshLocalOrCloudStatus(){
   if(hasCloudAccount()){
     await loadLatestPlanFromCloud().catch(()=>{});
     await loadLatestDietPlanFromCloud().catch(()=>{});
+    await syncXpEventsToCloud({silent:true}).catch(()=>{});
+    await loadXpFromCloud({silent:true}).catch(()=>{});
   }
   render();
   toast(cloudUser ? (isLocalMode()?'Modo local com IA pronto.':'Conta conectada.') : (state.entryMode==='account'?'Dados locais carregados. Entre novamente se a nuvem não conectar.':'Sem sessão online ativa.'));
@@ -1685,6 +1821,7 @@ async function saveWorkoutToCloud(p, h, opts={}){
       }
     }
     h.cloudSynced=true;
+    await syncXpEventForRecord(p, h, cloudId).catch(e=>console.warn('Erro ao sincronizar XP do treino:', e));
     const reportText=reportToText(h.aiReport);
     if(reportText && !h.cloudReportSynced){
       const { error: repError } = await supabaseClient.from('ai_reports').insert({
@@ -1722,6 +1859,7 @@ async function syncLocalHistoryToCloud(opts={}){
   }
   await saveCurrentPlanToCloud('manual_sync').catch(()=>{});
   await saveDietPlanToCloud(p.dietPlan, {silent:true}).catch(()=>{});
+  await syncXpEventsToCloud({silent:true}).catch(()=>{});
   save(); render();
   if(!opts.silent) toast(`Sincronização: ${sent} enviado(s), ${skipped} já estavam, ${failed} falha(s).`);
   return {ok: failed===0, sent, skipped, failed};
