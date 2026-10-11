@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gym-bronze-v7-0-0';
+const CACHE_NAME = 'gym-bronze-v7-0-3';
 const ASSETS = [
   './',
   './index.html',
