@@ -1,4 +1,4 @@
-Treino 100 Dias Pro v5.4.3
+Gym Bronze v5.4.3
 
 Novidades:
 - Modo local continua criando sempre perfil novo.

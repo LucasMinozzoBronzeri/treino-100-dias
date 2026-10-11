@@ -1,4 +1,4 @@
-Treino 100 Dias Pro v5.4.2
+Gym Bronze v5.4.2
 
 Correção:
 - Iniciar localmente agora cria sempre um perfil local novo.

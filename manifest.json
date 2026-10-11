@@ -1,15 +1,25 @@
 {
-  "name": "Treino 100 Dias Pro",
-  "short_name": "Treino 100",
-  "description": "App pessoal para acompanhar treinos, cargas, check-ins, bioimpedância e evolução.",
+  "name": "Gym Bronze",
+  "short_name": "Gym Bronze",
+  "description": "App de treino com visual bronze, acompanhamento de evolução, check-ins e apoio de IA.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#080808",
-  "theme_color": "#ff7a00",
+  "background_color": "#09090b",
+  "theme_color": "#c97722",
   "icons": [
-    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
   ]
 }

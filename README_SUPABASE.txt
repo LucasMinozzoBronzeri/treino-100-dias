@@ -1,4 +1,4 @@
-Treino 100 Dias Pro v5.2 — Supabase + IA com login
+Gym Bronze v5.2 — Supabase + IA com login
 
 O que mudou nesta versão:
 - Login/criação de conta via Supabase.

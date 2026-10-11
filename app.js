@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'treino100Pro.v1';
+const STORAGE_KEY = 'gymBronze.v1';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_BACKEND_URL = 'https://treino-100-api.vercel.app';
@@ -47,6 +47,27 @@ function normalizeExperienceLabel(value){
   if(v.includes('avanç') || v.includes('avanc')) return 'Avançado';
   if(v.includes('inter')) return 'Intermediário';
   return 'Iniciante';
+}
+function programWeeksForExperience(exp){
+  const level = normalizeExperienceLabel(exp);
+  if(level === 'Iniciante') return 4;
+  if(level === 'Intermediário') return 20;
+  return 30;
+}
+function targetWorkoutsForProfile(p){
+  const days = clampTrainingDays(p?.daysPerWeek || 5);
+  return days * programWeeksForExperience(p?.experience || 'Iniciante');
+}
+function programLabelForProfile(p){
+  const weeks = programWeeksForExperience(p?.experience || 'Iniciante');
+  const target = targetWorkoutsForProfile(p);
+  return `${weeks} semanas • ${target} treinos`;
+}
+function applyProgramDuration(p){
+  if(!p) return;
+  p.target = targetWorkoutsForProfile(p);
+  p.programWeeks = programWeeksForExperience(p.experience);
+  p.programLabel = programLabelForProfile(p);
 }
 function targetForExperience(exp, kind='default'){
   const level = normalizeExperienceLabel(exp);
@@ -129,6 +150,7 @@ function applyDefaultPlanForProfile(p, force=false){
   if(!p) return;
   if(!force && p.planMeta?.source === 'ai') return;
   if(!force && Array.isArray(p.history) && p.history.length) return;
+  applyProgramDuration(p);
   const plan = templateForProfile(p);
   p.workouts = structuredClone(plan.workouts);
   p.queue = p.workouts.map(w=>w.id);
@@ -157,7 +179,7 @@ function defaultState(){
 function newProfile(name='Novo perfil'){
   const p = {
     id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, age:'', height:'', weight:'', goal:'', focus:'', notes:'', experience:'Iniciante', daysPerWeek:'5',
-    queue: [], progress: 0, target: 100, workouts: [], planMeta:{source:'default', cycle:1, title:'Treino padrão'},
+    queue: [], progress: 0, target: 20, workouts: [], programWeeks:4, programLabel:'4 semanas • 20 treinos', planMeta:{source:'default', cycle:1, title:'Treino padrão'},
     weights:{}, exerciseMeta:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], ai:{autoWorkoutReport:true}, createdAt: nowISO()
   };
   applyDefaultPlanForProfile(p, true);
@@ -183,6 +205,7 @@ function ensureProfile(p){
   if(!p.planMeta) p.planMeta={source:'default', cycle:1, title:'Treino padrão'};
   if(!('experience' in p)) p.experience='';
   if(!('daysPerWeek' in p)) p.daysPerWeek='';
+  applyProgramDuration(p);
   p.ai.apiUrl = AI_BACKEND_URL;
   if(typeof p.ai.autoWorkoutReport !== 'boolean') p.ai.autoWorkoutReport = true;
   if(!Array.isArray(p.history)) p.history=[];
@@ -294,9 +317,9 @@ function renderOnboarding(){
   if(onboardingView === 'local') return renderLocalOnboarding();
   return `<section class="welcome-hero login-hero">
     <div class="welcome-copy">
-      <p class="eyebrow">Treino 100 Dias Pro</p>
-      <h2>Seu treino, seus dados, sua evolução.</h2>
-      <p>Entre para sincronizar na nuvem, gerar relatórios com IA e acompanhar sua evolução por ciclos.</p>
+      <p class="eyebrow">Gym Bronze</p>
+      <h2>Forje seu físico. Registre sua evolução.</h2>
+      <p>Entre para sincronizar na nuvem, receber apoio de IA e evoluir treino após treino.</p>
       <div class="mini-status"><span>${cloudStatusHTML()}</span><span>${isOffline()?'offline':'online'}</span></div>
     </div>
   </section>
@@ -317,7 +340,7 @@ function renderOnboarding(){
   </section>`;
 }
 function renderSignupOnboarding(){
-  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Criar conta</p><h2>Monte seu perfil inicial</h2><p>Com esses dados, a IA gera um treino de adaptação. Você pode editar tudo depois.</p></div></section>
+  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Criar conta</p><h2>Monte seu perfil inicial</h2><p>Com esses dados, a IA cria seu treino inicial. Depois você ajusta tudo.</p></div></section>
   <section class="auth-center"><div class="card auth-card wide">
     <div class="card-title"><div><h3>Dados da conta</h3><p>Perfil + login + primeiro treino com IA.</p></div><span class="badge green">IA inclusa</span></div>
     ${onboardingProfileFields('signup')}
@@ -330,7 +353,7 @@ function renderSignupOnboarding(){
   </div></section>`;
 }
 function renderLocalOnboarding(){
-  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Modo local</p><h2>Começar sem criar conta</h2><p>Os dados ficam neste aparelho. A IA funciona com sessão anônima enquanto estiver liberada.</p></div></section>
+  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Modo local</p><h2>Começar sem criar conta</h2><p>Os dados ficam neste aparelho. A IA pode funcionar no modo local enquanto estiver disponível.</p></div></section>
   <section class="auth-center"><div class="card auth-card wide">
     <div class="card-title"><div><h3>Perfil local</h3><p>Preencha para a IA gerar o treino de adaptação.</p></div><span class="badge yellow">Local</span></div>
     ${onboardingProfileFields('local')}
@@ -409,6 +432,7 @@ function applyProfileInfo(info, targetProfile=null){
   p.experience=normalizeExperienceLabel(info.experience);
   p.daysPerWeek=String(clampTrainingDays(info.daysPerWeek));
   p.notes=info.notes;
+  applyProgramDuration(p);
   ensureProfile(p);
   applyDefaultPlanForProfile(p, true);
   save();
@@ -501,16 +525,16 @@ function renderHome(){
         <div>
           <p class="eyebrow">Perfil ativo</p>
           <h2>${esc(p.name || 'Meu perfil')}</h2>
-          <p>${esc(p.goal || 'Seu projeto de evolução em 100 treinos.')}</p>
+          <p>${esc(p.goal || 'Seu projeto de evolução na academia.')}</p>
           <div class="actions"><button class="btn" data-action="start-current">Iniciar ${w.id}</button><button class="btn secondary" data-screen-go="progress">Ver progresso</button></div>
         </div>
         <div class="progress-ring" style="--p:${pct}%"><div class="progress-ring-inner">${p.progress}/${p.target}<small>${pct}%</small></div></div>
       </div>
     </section>
     <section class="card plan-card">
-      <div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title || 'Treino padrão')} • Ciclo ${p.planMeta?.cycle || Math.max(1, cycles+1)}</p></div><span class="badge ${p.planMeta?.source==='ai'?'green':'orange'}">${p.planMeta?.source==='ai'?'IA':'Padrão'}</span></div>
+      <div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title || 'Treino padrão')} • ${esc(p.programLabel || programLabelForProfile(p))} • Ciclo ${p.planMeta?.cycle || Math.max(1, cycles+1)}</p></div><span class="badge ${p.planMeta?.source==='ai'?'green':'orange'}">${p.planMeta?.source==='ai'?'IA':'Padrão'}</span></div>
       <p class="muted">${esc(p.planMeta?.notes || 'Use os dados dos treinos para ajustar o próximo ciclo com IA.')}</p>
-      <div class="actions"><button class="btn sm secondary" data-action="generate-initial-plan">Gerar/atualizar treino com IA</button><button class="btn sm ${p.progress>=5?'':'secondary'}" ${p.progress>=5?'':'disabled'} data-action="finish-cycle-ai">Finalizar ciclo e ajustar treino</button></div>
+      <div class="actions"><button class="btn sm secondary" data-action="generate-initial-plan">Gerar/atualizar treino com IA</button><button class="btn sm ${p.progress>=workoutsPerCycle(p)?'':'secondary'}" ${p.progress>=workoutsPerCycle(p)?'':'disabled'} data-action="finish-cycle-ai">Finalizar ciclo e ajustar treino</button></div>
     </section>
     <section class="card">
       <div class="card-title"><h3>Próximo treino</h3><span class="badge orange">${w.id}</span></div>
@@ -569,7 +593,7 @@ function renderCoach(){
 }
 function generateInsights(p){
   const out=[]; const cycles=currentCycleNumber(p); const st=stagnated(p);
-  out.push({icon:'🔥',title:`${p.progress}/${p.target} treinos concluídos`,text:`Você completou ${cycles} ciclos. Próxima meta: ${Math.min(p.target, (cycles+1)*5)} treinos.`,type:'orange'});
+  out.push({icon:'🔥',title:`${p.progress}/${p.target} treinos concluídos`,text:`Você completou ${cycles} ciclos. Próxima meta: ${Math.min(p.target, (cycles+1)*workoutsPerCycle(p))} treinos.`,type:'orange'});
   if(st.length) out.push({icon:'⚠️',title:'Possível estagnação de carga',text:`Há ${st.length} exercício(s) com mesma carga nos últimos registros. Se a execução estiver boa, planeje subir pouco ou melhorar reps.`,type:'orange'});
   const skipped = p.history.slice(-5).reduce((a,h)=>a+(h.skippedCount||0),0); if(skipped) out.push({icon:'🟡',title:'Exercícios pulados recentemente',text:`Nos últimos 5 treinos, você pulou ${skipped} exercício(s). Veja se isso está atrapalhando ombro/costas.`,type:'orange'});
   const lateralSkipped = p.history.slice(-12).some(h=>h.status?.d3==='skipped' || h.status?.d3===undefined && h.workoutId==='D'); if(lateralSkipped) out.push({icon:'💪',title:'Prioridade para ombro lateral',text:'Não deixe a elevação lateral na polia/máquina virar opcional. Ela é uma das chaves para ombro mais largo.',type:'orange'});
@@ -592,7 +616,7 @@ function historyRowHTML(h){
 
 
 function renderProfile(){ const p=profile(); const ai=p.ai||{}; return `<section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais. Se entrar na conta, salva também na nuvem.</p></div><div class="form-grid">
-  ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}${selectHTML('experience','Nível',p.experience,['Iniciante','Intermediário','Avançado'])}${selectHTML('daysPerWeek','Dias por semana',p.daysPerWeek,['2','3','4','5','6'], v=>v+' dias')}
+  ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}${selectHTML('experience','Nível',p.experience,['Iniciante','Intermediário','Avançado'])}${selectHTML('daysPerWeek','Dias por semana',p.daysPerWeek,['2','3','4','5','6'], v=>v+' dias')}<div class="stat"><strong>${esc(p.programLabel || programLabelForProfile(p))}</strong><span>meta do programa</span></div>
   <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div></div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button><button class="btn secondary" data-action="new-profile">Novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
   <section class="card"><div class="card-title"><div><h3>Conta e sincronização</h3><p>Sem login o app continua funcionando só neste aparelho. Com login, salva também no Supabase.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}</section>
   <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Backend configurado no app. Para gerar relatório, o usuário precisa estar logado e online.</p></div><span class="badge green">Pronta</span></div><div class="form-grid">
@@ -924,7 +948,7 @@ async function saveWorkoutToCloud(p, h, opts={}){
         user_id:user.id,
         workout_key:h.workoutId || '',
         workout_name:h.workoutName || '',
-        cycle_number:Math.floor((p.progress||0)/5),
+        cycle_number:currentCycleNumber(p),
         finished_at:h.date || nowISO(),
         notes:h.notes || null,
         local_id:h.id || null
@@ -1017,7 +1041,7 @@ function buildPlanAIPayload(mode='initial', extra={}){
     mode,
     cycleChangeRequest: extra.cycleChangeRequest || '',
     profile:{name:p.name, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
-    planRules:{daysPerWeek:clampTrainingDays(p.daysPerWeek), level:normalizeExperienceLabel(p.experience), allowedWorkoutIds:WORKOUT_LETTERS.slice(0, clampTrainingDays(p.daysPerWeek))},
+    planRules:{daysPerWeek:clampTrainingDays(p.daysPerWeek), level:normalizeExperienceLabel(p.experience), programWeeks:programWeeksForExperience(p.experience), targetWorkouts:targetWorkoutsForProfile(p), programLabel:programLabelForProfile(p), allowedWorkoutIds:WORKOUT_LETTERS.slice(0, clampTrainingDays(p.daysPerWeek))},
     defaultTemplate:templateForProfile(p),
     currentPlan:{title:p.planMeta?.title, cycle:p.planMeta?.cycle, source:p.planMeta?.source, workouts:p.workouts},
     progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, currentCycleNumber(p)+1)},
@@ -1056,7 +1080,8 @@ function applyAIPlan(plan, mode='initial'){
   p.queue=normalized.workouts.map(w=>w.id);
   p.tempDone={};
   p.tempStatus={};
-  p.planMeta={source:'ai', cycle: mode==='cycle' ? (p.planMeta?.cycle||1)+1 : (p.planMeta?.cycle||1), title:normalized.title, notes:normalized.notes, updatedAt:nowISO()};
+  applyProgramDuration(p);
+  p.planMeta={source:'ai', cycle: mode==='cycle' ? (p.planMeta?.cycle||1)+1 : (p.planMeta?.cycle||1), title:normalized.title, notes:normalized.notes, updatedAt:nowISO(), programLabel:programLabelForProfile(p)};
   save();
 }
 async function callPlanAI(mode='initial', extra={}){

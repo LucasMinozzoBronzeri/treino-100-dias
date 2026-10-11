@@ -1,4 +1,4 @@
-Treino 100 Dias Pro v5.3 — Onboarding + Modo Local + IA
+Gym Bronze v5.3 — Onboarding + Modo Local + IA
 
 O que mudou:
 - Tela inicial antes do app principal.

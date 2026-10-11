@@ -1,4 +1,4 @@
-TREINO 100 DIAS PRO
+GYM BRONZE
 
 Como usar:
 1. Suba todos os arquivos desta pasta na raiz do repositório GitHub.

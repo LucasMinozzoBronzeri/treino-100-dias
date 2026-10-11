@@ -1,4 +1,4 @@
-Treino 100 Dias Pro v5.4
+Gym Bronze v5.4
 
 Novidades:
 - Tela inicial simplificada com um bloco de login.

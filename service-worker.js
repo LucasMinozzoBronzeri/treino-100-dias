@@ -1,4 +1,4 @@
-const CACHE_NAME = 'treino-100-pro-v5-4-3-days-levels';
+const CACHE_NAME = 'gym-bronze-v1';
 const ASSETS = [
   './',
   './index.html',
