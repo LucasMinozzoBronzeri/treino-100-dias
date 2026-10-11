@@ -1,0 +1,72 @@
+-- Gym Bronze v5.7 — SQL consolidado
+-- Rode no Supabase SQL Editor antes de subir o app/backend v5.7.
+
+-- Campos do perfil
+alter table public.profiles
+  add column if not exists sex text,
+  add column if not exists notes text,
+  add column if not exists experience text,
+  add column if not exists days_per_week numeric,
+  add column if not exists accepted_terms_at timestamptz,
+  add column if not exists accepted_privacy_at timestamptz;
+
+-- Controle de limite diário de requisições IA por usuário
+create table if not exists public.ai_usage_limits (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  usage_date date not null default current_date,
+  feature text not null,
+  count integer not null default 0,
+  last_used_at timestamptz default now(),
+  created_at timestamptz default now(),
+  unique(user_id, usage_date, feature)
+);
+
+alter table public.ai_usage_limits enable row level security;
+
+drop policy if exists "Users can view own ai usage" on public.ai_usage_limits;
+drop policy if exists "Users can insert own ai usage" on public.ai_usage_limits;
+drop policy if exists "Users can update own ai usage" on public.ai_usage_limits;
+
+create policy "Users can view own ai usage"
+on public.ai_usage_limits for select
+using (auth.uid() = user_id);
+
+create policy "Users can insert own ai usage"
+on public.ai_usage_limits for insert
+with check (auth.uid() = user_id);
+
+create policy "Users can update own ai usage"
+on public.ai_usage_limits for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+-- Histórico de rotinas alimentares geradas
+create table if not exists public.nutrition_plans (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text,
+  summary text,
+  plan_json jsonb not null,
+  provider text default 'gemini',
+  model text,
+  created_at timestamptz default now()
+);
+
+alter table public.nutrition_plans enable row level security;
+
+drop policy if exists "Users can view own nutrition plans" on public.nutrition_plans;
+drop policy if exists "Users can insert own nutrition plans" on public.nutrition_plans;
+drop policy if exists "Users can delete own nutrition plans" on public.nutrition_plans;
+
+create policy "Users can view own nutrition plans"
+on public.nutrition_plans for select
+using (auth.uid() = user_id);
+
+create policy "Users can insert own nutrition plans"
+on public.nutrition_plans for insert
+with check (auth.uid() = user_id);
+
+create policy "Users can delete own nutrition plans"
+on public.nutrition_plans for delete
+using (auth.uid() = user_id);

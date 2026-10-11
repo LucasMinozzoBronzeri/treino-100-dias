@@ -1,7 +1,7 @@
 {
   "name": "Gym Bronze",
   "short_name": "Gym Bronze",
-  "description": "App de treino com visual bronze, acompanhamento de evolução, check-ins e apoio de IA.",
+  "description": "App de treino, evolução e rotina alimentar com apoio inteligente.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

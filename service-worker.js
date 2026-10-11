@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gym-bronze-v5-6-no-default-plan';
+const CACHE_NAME = 'gym-bronze-v5-7-polish-nutri';
 const ASSETS = [
   './',
   './index.html',

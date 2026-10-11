@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'gymBronze.v1';
+const STORAGE_KEY = 'gymBronze.v57';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -293,7 +293,7 @@ function init(){
   render();
 }
 function setScreen(s){ screen=s; render(); }
-function titleFor(s){ return {home:'Início',workouts:'Treinos',progress:'Progresso',checkin:'Check-in',coach:'Análise',profile:'Perfil'}[s] || 'Início'; }
+function titleFor(s){ return {home:'Início',workouts:'Treinos',progress:'Progresso',checkin:'Check-in',coach:'Nutri & Análise',profile:'Perfil'}[s] || 'Início'; }
 function render(){
   const p = profile();
   if(shouldShowOnboarding()){
@@ -344,23 +344,26 @@ function renderOnboarding(){
   </section>`;
 }
 function renderSignupOnboarding(){
-  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Criar conta</p><h2>Monte seu perfil inicial</h2><p>Com esses dados, a IA cria seu treino inicial. Depois você ajusta tudo.</p></div></section>
+  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Criar conta</p><h2>Monte seu perfil inicial</h2><p>Preencha seu perfil para criar um plano inicial mais coerente com sua rotina.</p></div></section>
   <section class="auth-center"><div class="card auth-card wide">
     <div class="card-title"><div><h3>Dados da conta</h3><p>Perfil + login + primeiro treino com IA.</p></div><span class="badge green">IA inclusa</span></div>
     ${onboardingProfileFields('signup')}
     <div class="form-grid">
       <div class="field"><label>E-mail</label><input class="input" id="signupEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div>
-      <div class="field"><label>Senha</label><input class="input" id="signupPassword" type="password" autocomplete="new-password" placeholder="mínimo 6 caracteres"></div>
+      <div class="field"><label>Senha</label><input class="input" id="signupPassword" type="password" autocomplete="new-password" placeholder="Maiúscula, número e especial"></div>
+      <div class="field"><label>Confirmar senha</label><input class="input" id="signupPassword2" type="password" autocomplete="new-password" placeholder="repita a senha"></div>
+      <label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="signupAcceptTerms"> <span>Li e aceito os Termos, a Política de Privacidade e entendo que o Gym Bronze não substitui profissionais de saúde, nutrição ou educação física.</span></label>
     </div>
     <p class="form-error hidden" id="signupError"></p>
     <div class="actions"><button class="btn full" data-onboarding="signup">Criar conta e gerar treino</button><button class="btn secondary full" data-onboarding="show-login">Voltar ao login</button></div>
   </div></section>`;
 }
 function renderLocalOnboarding(){
-  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Modo local</p><h2>Começar sem criar conta</h2><p>Os dados ficam neste aparelho. A IA pode funcionar no modo local enquanto estiver disponível.</p></div></section>
+  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Modo local</p><h2>Começar sem criar conta</h2><p>Use sem conta. Seus dados ficam no aparelho e a IA funciona enquanto o modo local estiver disponível.</p></div></section>
   <section class="auth-center"><div class="card auth-card wide">
     <div class="card-title"><div><h3>Perfil local</h3><p>Preencha para a IA gerar o treino de adaptação.</p></div><span class="badge yellow">Local</span></div>
     ${onboardingProfileFields('local')}
+    <label class="legal-check"><input type="checkbox" id="localAcceptTerms"> <span>Li e aceito os Termos, a Política de Privacidade e entendo que a IA é apenas apoio educativo.</span></label>
     <p class="form-error hidden" id="localError"></p>
     <div class="actions"><button class="btn full" data-onboarding="local">Iniciar localmente e gerar treino</button><button class="btn secondary full" data-onboarding="show-login">Voltar ao login</button></div>
     <p class="muted">Se limpar os dados do navegador, o histórico local pode ser perdido. Para recuperar em outro dispositivo, use uma conta.</p>
@@ -377,7 +380,7 @@ function onboardingProfileFields(prefix){
     <div class="field"><label>Foco principal</label><input class="input" id="${prefix}Focus" placeholder="ex: peito, braços, recomposição"></div>
     <div class="field"><label>Nível</label><select class="select" id="${prefix}Experience"><option value="">Selecione</option><option>Iniciante</option><option>Intermediário</option><option>Avançado</option></select></div>
     <div class="field"><label>Dias por semana</label><select class="select" id="${prefix}Days"><option value="2">2 dias</option><option value="3">3 dias</option><option value="4">4 dias</option><option value="5" selected>5 dias</option><option value="6">6 dias</option></select></div>
-    <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea id="${prefix}Notes" placeholder="Dor, limitação, tempo de treino, equipamento, preferências..."></textarea></div>
+    <div class="field" style="grid-column:1/-1"><label>Observações importantes</label><textarea id="${prefix}Notes" placeholder="Dor, limitação, tempo disponível, exercícios que gosta/não gosta, restrições alimentares..."></textarea></div>
   </div>`;
 }
 function bindOnboarding(){
@@ -427,6 +430,21 @@ function validateProfileInfo(info){
   if(!info.experience) return 'Informe sua experiência.';
   if(!info.daysPerWeek || clampTrainingDays(info.daysPerWeek) != Number(info.daysPerWeek)) return 'Escolha entre 2 e 6 dias por semana.';
   return '';
+}
+
+function validateStrongPassword(password){
+  if(!password || password.length < 8) return 'A senha precisa ter pelo menos 8 caracteres.';
+  if(!/[A-ZÁÉÍÓÚÂÊÔÃÕÇ]/.test(password)) return 'A senha precisa ter ao menos uma letra maiúscula.';
+  if(!/[0-9]/.test(password)) return 'A senha precisa ter ao menos um número.';
+  if(!/[^A-Za-z0-9À-ÿ]/.test(password)) return 'A senha precisa ter ao menos um caractere especial.';
+  return '';
+}
+function markLegalAcceptance(targetProfile=null){
+  const p=targetProfile || profile();
+  const now=nowISO();
+  p.acceptedTermsAt = p.acceptedTermsAt || now;
+  p.acceptedPrivacyAt = p.acceptedPrivacyAt || now;
+  return p;
 }
 function applyProfileInfo(info, targetProfile=null){
   const p=targetProfile || profile();
@@ -480,9 +498,14 @@ async function onboardingSignup(){
   if(msg) return showFormError('signupError', msg);
   const email=byId('signupEmail')?.value?.trim();
   const password=byId('signupPassword')?.value || '';
+  const password2=byId('signupPassword2')?.value || '';
   if(!email || !email.includes('@')) return showFormError('signupError', 'Informe um e-mail válido.');
-  if(!password || password.length < 6) return showFormError('signupError', 'A senha precisa ter pelo menos 6 caracteres.');
+  const passMsg=validateStrongPassword(password);
+  if(passMsg) return showFormError('signupError', passMsg);
+  if(password !== password2) return showFormError('signupError', 'As senhas não conferem.');
+  if(!byId('signupAcceptTerms')?.checked) return showFormError('signupError', 'Aceite os Termos e a Política de Privacidade para continuar.');
   applyProfileInfo(info);
+  markLegalAcceptance();
   const { data, error } = await supabaseClient.auth.signUp({email,password, options:{data:{display_name:info.name}}});
   if(error) return showFormError('signupError', 'Erro ao criar conta: '+error.message);
   cloudUser=data?.user || null;
@@ -504,10 +527,12 @@ async function onboardingLocal(){
   const info=readOnboardingProfile('local');
   const msg=validateProfileInfo(info);
   if(msg) return showFormError('localError', msg);
+  if(!byId('localAcceptTerms')?.checked) return showFormError('localError', 'Aceite os Termos e a Política de Privacidade para continuar.');
 
   // Modo local deve sempre começar como um perfil novo, sem reaproveitar
   // nome, histórico, fila ou sessão anônima anterior.
   createFreshLocalProfile(info);
+  markLegalAcceptance();
   state.onboardingDone=true;
   state.entryMode='local';
   save();
@@ -621,17 +646,23 @@ function renderCheckin(){
   <section class="card"><div class="card-title"><h3>Bioimpedância / medidas</h3></div>${p.bio.length?p.bio.slice().reverse().map(b=>`<div class="history-row"><div><strong>${fmtDate(b.date)} — ${b.weight||'--'} kg</strong><span>Gordura: ${b.bodyFat||'--'}% • Massa magra: ${b.leanMass||'--'} kg • Cintura: ${b.waist||'--'} cm</span></div><span class="badge orange">Bio</span></div>`).join(''):'<div class="empty">Nenhuma avaliação inserida.</div>'}</section>`;
 }
 
+function renderDietPlanHTML(diet){
+  if(!diet) return '<div class="empty">Nenhuma rotina alimentar gerada ainda.</div>';
+  const schedule = Array.isArray(diet.mealSchedule) ? diet.mealSchedule : Array.isArray(diet.routine) ? diet.routine : [];
+  const scheduleHTML = schedule.length ? `<div class="meal-timeline">${schedule.map(m=>`<div class="meal-item"><div class="meal-time">${esc(m.timeWindow || m.time || '')}</div><div><strong>${esc(m.meal || m.title || 'Refeição')}</strong><p>${esc(m.foods || m.description || '')}</p>${m.portions?`<span>${esc(m.portions)}</span>`:''}${m.notes?`<em>${esc(m.notes)}</em>`:''}</div></div>`).join('')}</div>` : '';
+  return `<div class="ai-report diet-report"><strong>${esc(diet.title||'Rotina alimentar')}</strong><p>${esc(diet.summary||'')}</p>${diet.guidelines?`<p><b>Diretrizes:</b> ${esc(Array.isArray(diet.guidelines)?diet.guidelines.join(' • '):diet.guidelines)}</p>`:''}${scheduleHTML}${diet.shoppingList?`<p><b>Base de compras:</b> ${esc(Array.isArray(diet.shoppingList)?diet.shoppingList.join(' • '):diet.shoppingList)}</p>`:''}${diet.attention?`<p><b>Atenção:</b> ${esc(diet.attention)}</p>`:''}</div>`;
+}
 function renderCoach(){
   const p=profile(); const insights=generateInsights(p); const aiOn=canUseOnlineAI(); const reports=p.history.filter(h=>h.aiReport || h.aiReportStatus || h.aiReportError).slice(-5).reverse();
   const diet = p.dietPlan;
-  return `<section class="hero"><p class="eyebrow">Coach</p><h2>Análise inteligente</h2><p>${aiOn?'IA online pronta para treino, ciclo e orientação alimentar.':(isOffline()?'Você está offline. A análise local funciona, mas IA e nuvem ficam pausadas.':'Entre na conta ou use modo local para liberar a IA online.')}</p><div class="actions"><button class="btn secondary" data-screen-go="profile">Configurar IA</button></div></section>
-  <section class="card"><div class="card-title"><h3>Status da IA</h3><span class="badge ${aiOn?'green':'yellow'}">${aiOn?'Online pronta':(isOffline()?'Offline':'Login necessário')}</span></div><p class="muted">Relatório automático ao finalizar treino: <strong>${p.ai?.autoWorkoutReport?'ativado':'desativado'}</strong></p><p class="muted">Limite diário controlado no backend por usuário para evitar abuso.</p></section>
-  <section class="card"><div class="card-title"><div><h3>Orientação alimentar</h3><p>Baseada no perfil e objetivo. Não substitui nutricionista.</p></div><span class="badge orange">Beta</span></div>
-    ${diet?`<div class="ai-report"><strong>${esc(diet.title||'Plano alimentar')}</strong><p>${esc(diet.summary||'')}</p>${diet.guidelines?`<p><b>Diretrizes:</b> ${esc(Array.isArray(diet.guidelines)?diet.guidelines.join(' • '):diet.guidelines)}</p>`:''}${diet.mealStructure?`<p><b>Estrutura:</b> ${esc(Array.isArray(diet.mealStructure)?diet.mealStructure.join(' • '):diet.mealStructure)}</p>`:''}${diet.attention?`<p><b>Atenção:</b> ${esc(diet.attention)}</p>`:''}</div>`:'<div class="empty">Nenhuma orientação alimentar gerada ainda.</div>'}
-    <div class="actions"><button class="btn" data-action="generate-diet-plan">Gerar orientação alimentar</button></div>
+  return `<section class="hero"><p class="eyebrow">Nutri & Análise</p><h2>Rotina, evolução e ajustes</h2><p>${aiOn?'IA online pronta para revisar treino, ciclo e alimentação.':(isOffline()?'Você está offline. A análise local funciona, mas IA e nuvem ficam pausadas.':'Entre na conta ou use modo local para liberar os recursos inteligentes.')}</p><div class="actions"><button class="btn secondary" data-screen-go="profile">Configurar conta</button></div></section>
+  <section class="card"><div class="card-title"><h3>Status dos recursos inteligentes</h3><span class="badge ${aiOn?'green':'yellow'}">${aiOn?'Online':(isOffline()?'Offline':'Login necessário')}</span></div><p class="muted">Relatório automático ao finalizar treino: <strong>${p.ai?.autoWorkoutReport?'ativado':'desativado'}</strong></p><p class="muted">Limite diário controlado no backend por usuário para evitar abuso.</p></section>
+  <section class="card"><div class="card-title"><div><h3>Rotina alimentar</h3><p>Plano educativo baseado no seu perfil, objetivo e treino. Não substitui nutricionista.</p></div><span class="badge orange">Beta</span></div>
+    ${renderDietPlanHTML(diet)}
+    <div class="actions"><button class="btn" data-action="generate-diet-plan">Gerar rotina alimentar</button></div>
   </section>
   <section class="grid">${insights.map(i=>`<div class="alert ${i.type==='orange'?'orange':''}"><div>${i.icon}</div><div><strong>${esc(i.title)}</strong><p>${esc(i.text)}</p></div></div>`).join('')}</section>
-  <section class="card"><div class="card-title"><h3>Últimos relatórios da IA</h3><p>Gerados ao finalizar treino</p></div>${reports.length?reports.map(h=>aiHistoryHTML(h)).join(''):'<div class="empty">Nenhum relatório de IA salvo ainda.</div>'}</section>`;
+  <section class="card"><div class="card-title"><h3>Últimos relatórios</h3><p>Gerados ao finalizar treino</p></div>${reports.length?reports.map(h=>aiHistoryHTML(h)).join(''):'<div class="empty">Nenhum relatório salvo ainda.</div>'}</section>`;
 }
 function generateInsights(p){
   const out=[]; const cycles=currentCycleNumber(p); const st=stagnated(p);
@@ -665,6 +696,7 @@ function renderProfile(){ const p=profile(); const ai=p.ai||{}; return `<section
     <label class="toggle-row" style="grid-column:1/-1"><input type="checkbox" data-ai-field="autoWorkoutReport" ${ai.autoWorkoutReport?'checked':''}> <span>Gerar relatório automaticamente ao finalizar treino</span></label>
   </div><div class="actions"><button class="btn" data-action="save-profile">Salvar configuração</button><button class="btn secondary" data-action="test-ai">Testar IA</button></div><p class="muted">Versão correta: não usa APP_TOKEN fixo no frontend. A Vercel valida o login Supabase antes de chamar a IA.</p></section>
   <section class="card"><div class="card-title"><h3>Perfis</h3><p>${state.profiles.length} perfil(is)</p></div><div class="profile-list">${state.profiles.map(x=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((x.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(x.name || 'Perfil')}</strong><div class="small">${x.progress}/${x.target} treinos</div></div></div><button class="btn sm ${x.id===state.activeProfileId?'green':'secondary'}" data-switch-profile="${x.id}">${x.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div></section>
+  <section class="card legal-card"><div class="card-title"><div><h3>Termos e avisos</h3><p>Transparência para uso público.</p></div><span class="badge yellow">Beta</span></div><div class="legal-text"><p>O Gym Bronze é uma ferramenta de organização, treino e análise. Ele não substitui personal trainer, nutricionista, médico ou fisioterapeuta.</p><p>As sugestões de treino e alimentação são educativas. Interrompa o exercício em caso de dor forte, tontura, falta de ar incomum ou desconforto relevante.</p><p>Dados como idade, peso, altura, objetivo, observações, treinos e relatórios podem ser enviados para serviços externos de IA quando você usa recursos inteligentes.</p></div></section>
   <section class="card"><div class="card-title"><h3>Zona perigosa</h3></div><button class="btn danger full" data-action="reset-profile">Resetar perfil ativo</button></section>`; }
 function renderCloudAccount(p){
   const synced = p.history.filter(h=>h.cloudSynced).length;
@@ -672,7 +704,7 @@ function renderCloudAccount(p){
   if(hasCloudAccount()){
     return `<div class="cloud-panel"><p><b>Conta:</b> ${esc(cloudUser.email||'usuário conectado')}</p><p class="muted">Histórico local: ${p.history.length} treino(s) • Na nuvem: ${synced} • Pendentes: ${pending}</p><div class="actions"><button class="btn" data-action="cloud-sync">Sincronizar histórico com a nuvem</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button><button class="btn secondary" data-action="cloud-logout">Sair</button></div></div>`;
   }
-  const upgradeForm = `<div class="form-grid"><div class="field" style="grid-column:1/-1"><label>Nome para criar conta</label><input class="input" id="cloudName" value="${esc(p.name||'')}"></div><div class="field"><label>E-mail</label><input class="input" id="cloudEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div><div class="field"><label>Senha</label><input class="input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="mínimo 6 caracteres"></div></div><div class="actions"><button class="btn" data-action="cloud-login">Entrar</button><button class="btn secondary" data-action="cloud-signup">Criar conta</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div>`;
+  const upgradeForm = `<div class="form-grid"><div class="field" style="grid-column:1/-1"><label>Nome para criar conta</label><input class="input" id="cloudName" value="${esc(p.name||'')}"></div><div class="field"><label>E-mail</label><input class="input" id="cloudEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div><div class="field"><label>Senha</label><input class="input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="Maiúscula, número e especial"></div><div class="field"><label>Confirmar senha</label><input class="input" id="cloudPassword2" type="password" autocomplete="new-password" placeholder="repita a senha"></div><label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="cloudAcceptTerms"> <span>Li e aceito os Termos e a Política de Privacidade.</span></label></div><div class="actions"><button class="btn" data-action="cloud-login">Entrar</button><button class="btn secondary" data-action="cloud-signup">Criar conta</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div>`;
   if(isLocalMode()){
     return `<div class="cloud-panel"><p><b>Modo local ativo.</b></p><p class="muted">Seus treinos ficam neste aparelho. A IA online usa uma sessão anônima do Supabase quando houver internet. Para sincronizar na nuvem e recuperar em outro dispositivo, crie uma conta.</p><div class="actions"><button class="btn secondary" data-action="cloud-refresh">Atualizar IA/local</button></div></div><div class="divider"></div>${upgradeForm}`;
   }
@@ -937,9 +969,13 @@ async function cloudSignup(){
   const name=byId('cloudName')?.value?.trim() || p.name || 'Usuário';
   const email=byId('cloudEmail')?.value?.trim();
   const password=byId('cloudPassword')?.value || '';
+  const password2=byId('cloudPassword2')?.value || '';
   if(!email || !email.includes('@')) return toast('Informe um e-mail válido.');
-  if(!password || password.length < 6) return toast('A senha precisa ter pelo menos 6 caracteres.');
-  p.name=name; ensureProfile(p); save();
+  const passMsg=validateStrongPassword(password);
+  if(passMsg) return toast(passMsg);
+  if(password !== password2) return toast('As senhas não conferem.');
+  if(!byId('cloudAcceptTerms')?.checked) return toast('Aceite os Termos e a Política de Privacidade.');
+  p.name=name; ensureProfile(p); markLegalAcceptance(p); save();
   const { data, error } = await supabaseClient.auth.signUp({email,password, options:{data:{display_name:name}}});
   if(error) return toast('Erro ao criar conta: '+error.message);
   cloudUser=data?.user || null;
@@ -958,7 +994,7 @@ async function upsertCloudProfile(name){
   const user=await getCurrentCloudUser();
   if(!user) return;
   const p=profile();
-  await supabaseClient.from('profiles').upsert({id:user.id, name:name || p.name || 'Usuário', sex:p.sex || null, age:parseNumberValue(p.age), height:parseNumberValue(p.height), initial_weight:parseNumberValue(p.weight), goal:p.goal || null, focus:p.focus || null, notes:p.notes || null, experience:p.experience || null, days_per_week:parseNumberValue(p.daysPerWeek)});
+  await supabaseClient.from('profiles').upsert({id:user.id, name:name || p.name || 'Usuário', sex:p.sex || null, age:parseNumberValue(p.age), height:parseNumberValue(p.height), initial_weight:parseNumberValue(p.weight), goal:p.goal || null, focus:p.focus || null, notes:p.notes || null, experience:p.experience || null, days_per_week:parseNumberValue(p.daysPerWeek), accepted_terms_at:p.acceptedTermsAt || null, accepted_privacy_at:p.acceptedPrivacyAt || null});
 }
 function reportToText(report){
   if(!report) return '';
@@ -1203,14 +1239,14 @@ async function callDietAI(){
 }
 async function generateDietPlan(){
   try{
-    toast('Gerando orientação alimentar...');
+    toast('Gerando rotina alimentar...');
     const diet=await callDietAI();
     profile().dietPlan = {...diet, generatedAt:nowISO()};
     save();
     render();
-    toast('Orientação alimentar gerada.');
+    toast('Rotina alimentar gerada.');
   }catch(e){
-    toast('Não consegui gerar orientação alimentar: '+(e.message||'erro'));
+    toast('Não consegui gerar rotina alimentar: '+(e.message||'erro'));
   }
 }
 
