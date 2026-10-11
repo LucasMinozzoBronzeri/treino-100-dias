@@ -157,7 +157,7 @@ function applyDefaultPlanForProfile(p, force=false){
   p.queue = p.workouts.map(w=>w.id);
   p.tempDone = {};
   p.tempStatus = {};
-  p.planMeta = {source:'default', cycle:p.planMeta?.cycle || 1, title:`Treino padrão • ${plan.title}`, updatedAt:nowISO()};
+  p.planMeta = {source:'default', cycle:p.planMeta?.cycle || 1, title:`Treino padrão • ${plan.title}`, notes:'Treino padrão aplicado como fallback. Você pode manter este treino ou pedir um treino específico com IA.', updatedAt:nowISO(), needsDefaultChoice:true};
 }
 function workoutsPerCycle(p=profile()){
   const count = Array.isArray(p?.workouts) && p.workouts.length ? p.workouts.length : clampTrainingDays(p?.daysPerWeek || 5);
@@ -180,10 +180,10 @@ function defaultState(){
 function newProfile(name='Novo perfil'){
   const p = {
     id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, sex:'', age:'', height:'', weight:'', goal:'', focus:'', notes:'', experience:'Iniciante', daysPerWeek:'5', dietPlan:null,
-    queue: [], progress: 0, target: 20, workouts: [], programWeeks:4, programLabel:'4 semanas • 20 treinos', planMeta:{source:'default', cycle:1, title:'Treino padrão'},
+    queue: [], progress: 0, target: 20, workouts: [], programWeeks:4, programLabel:'4 semanas • 20 treinos', planMeta:{source:'pending', cycle:1, title:'Aguardando treino inteligente', notes:'Preencha o perfil e gere um treino específico antes de começar.'},
     weights:{}, exerciseMeta:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], ai:{autoWorkoutReport:true}, createdAt: nowISO()
   };
-  applyDefaultPlanForProfile(p, true);
+  applyProgramDuration(p);
   return p;
 }
 function load(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultState(); } catch { return defaultState(); } }
@@ -203,9 +203,10 @@ function profile(){ const p = state.profiles.find(p=>p.id===state.activeProfileI
 function ensureProfile(p){
   if(!p) return p;
   if(!p.ai) p.ai={autoWorkoutReport:true};
-  if(!p.planMeta) p.planMeta={source:'default', cycle:1, title:'Treino padrão'};
+  if(!p.planMeta) p.planMeta={source:'pending', cycle:1, title:'Aguardando treino inteligente'};
   if(!('sex' in p)) p.sex='';
   if(!('dietPlan' in p)) p.dietPlan=null;
+  if(p.planMeta?.source === 'default' && p.planMeta.needsDefaultChoice === undefined) p.planMeta.needsDefaultChoice = true;
   if(!('experience' in p)) p.experience='';
   if(!('daysPerWeek' in p)) p.daysPerWeek='';
   applyProgramDuration(p);
@@ -441,7 +442,10 @@ function applyProfileInfo(info, targetProfile=null){
   p.notes=info.notes;
   applyProgramDuration(p);
   ensureProfile(p);
-  applyDefaultPlanForProfile(p, true);
+  if(!Array.isArray(p.workouts) || !p.workouts.length){
+    p.queue=[];
+    p.planMeta={source:'pending', cycle:p.planMeta?.cycle || 1, title:'Aguardando treino inteligente', notes:'O app vai tentar gerar um treino específico com IA. Se falhar, você pode usar o treino padrão.'};
+  }
   save();
   return p;
 }
@@ -485,9 +489,15 @@ async function onboardingSignup(){
   state.onboardingDone=true;
   state.entryMode='account';
   save();
-  if(cloudUser){ await upsertCloudProfile(info.name); await generateInitialPlanFromAI({silent:false}); }
+  if(cloudUser){
+    await upsertCloudProfile(info.name);
+    await generateInitialPlanFromAI({silent:false, fallbackDefault:true});
+    toast(data?.session ? 'Conta criada. Treino específico preparado ou fallback aplicado.' : 'Conta criada. Confirme seu e-mail para liberar IA e nuvem.');
+  } else {
+    applyDefaultPlanForProfile(profile(), true);
+    toast('Conta criada. Não consegui liberar a IA agora, então apliquei treino padrão.');
+  }
   screen='home';
-  toast(data?.session ? 'Conta criada e treino de adaptação preparado.' : 'Conta criada. Confirme seu e-mail para liberar IA e nuvem.');
   render();
 }
 async function onboardingLocal(){
@@ -511,21 +521,41 @@ async function onboardingLocal(){
       const { data, error } = await supabaseClient.auth.signInAnonymously({options:{data:{display_name:info.name, entry_mode:'local', local_profile_id: state.activeProfileId}}});
       if(error) throw error;
       cloudUser=data?.user || null;
-      await generateInitialPlanFromAI({silent:false});
-      toast('Novo perfil local criado com IA e treino de adaptação.');
+      await generateInitialPlanFromAI({silent:false, fallbackDefault:true});
+      toast(profile().planMeta?.source==='ai' ? 'Novo perfil local criado com treino específico.' : 'Novo perfil local criado com treino padrão por fallback.');
     }catch(e){
-      toast('Novo perfil local criado. IA online precisa de login anônimo habilitado no Supabase.');
+      applyDefaultPlanForProfile(profile(), true);
+      toast('Novo perfil local criado. Não consegui usar a IA, então apliquei treino padrão.');
     }
   }else{
-    toast('Novo perfil local criado. IA fica pausada enquanto estiver offline.');
+    applyDefaultPlanForProfile(profile(), true);
+    toast('Novo perfil local criado offline. Apliquei treino padrão por enquanto.');
   }
   screen='home';
   render();
 }
 
+function hasWorkoutPlan(p){ return Array.isArray(p?.workouts) && p.workouts.length && Array.isArray(p?.queue) && p.queue.length; }
+function renderPlanActions(p){
+  const source = p.planMeta?.source || 'pending';
+  const needsChoice = source === 'default' && p.planMeta?.needsDefaultChoice;
+  if(source === 'pending' || !hasWorkoutPlan(p)){
+    return `<div class="actions"><button class="btn sm" data-action="generate-initial-plan">Gerar treino específico</button><button class="btn sm secondary" data-action="use-default-plan">Usar treino padrão</button></div>`;
+  }
+  if(needsChoice){
+    return `<div class="actions"><button class="btn sm" data-action="generate-initial-plan">Atualizar treino para específico</button><button class="btn sm secondary" data-action="accept-default-plan">Ficar com treino default</button></div>`;
+  }
+  return `<div class="actions"><button class="btn sm secondary" data-action="generate-initial-plan">Criar treino inteligente</button><button class="btn sm ${p.progress>=workoutsPerCycle(p)?'':'secondary'}" ${p.progress>=workoutsPerCycle(p)?'':'disabled'} data-action="finish-cycle-ai">Revisar próximo ciclo</button></div>`;
+}
 function renderHome(){
-  const p = profile(); const w=currentWorkout(p); const pct=Math.min(100, Math.round(p.progress/p.target*100));
+  const p = profile();
+  const hasPlan = hasWorkoutPlan(p);
+  const w = hasPlan ? currentWorkout(p) : null;
+  const pct = p.target ? Math.min(100, Math.round(p.progress/p.target*100)) : 0;
   const cycles = currentCycleNumber(p);
+  const planSource = p.planMeta?.source || 'pending';
+  const planBadge = planSource==='ai' ? 'IA' : planSource==='default' ? 'Padrão' : 'Pendente';
+  const planBadgeClass = planSource==='ai' ? 'green' : planSource==='default' ? 'orange' : 'yellow';
   return `
     <section class="hero">
       <div class="hero-row">
@@ -533,36 +563,36 @@ function renderHome(){
           <p class="eyebrow">Perfil ativo</p>
           <h2>${esc(p.name || 'Meu perfil')}</h2>
           <p>${esc(p.goal || 'Seu projeto de evolução na academia.')}</p>
-          <div class="actions"><button class="btn" data-action="start-current">Iniciar ${w.id}</button><button class="btn secondary" data-screen-go="progress">Ver progresso</button></div>
+          <div class="actions">${hasPlan?`<button class="btn" data-action="start-current">Iniciar ${w.id}</button>`:`<button class="btn" data-action="generate-initial-plan">Gerar treino específico</button>`}<button class="btn secondary" data-screen-go="progress">Ver progresso</button></div>
         </div>
         <div class="progress-ring" style="--p:${pct}%"><div class="progress-ring-inner">${p.progress}/${p.target}<small>${pct}%</small></div></div>
       </div>
     </section>
     <section class="card plan-card">
-      <div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title || 'Treino padrão')} • ${esc(p.programLabel || programLabelForProfile(p))} • Ciclo ${p.planMeta?.cycle || Math.max(1, cycles+1)}</p></div><span class="badge ${p.planMeta?.source==='ai'?'green':'orange'}">${p.planMeta?.source==='ai'?'IA':'Padrão'}</span></div>
-      <p class="muted">${esc(p.planMeta?.notes || 'Use os dados dos treinos para ajustar o próximo ciclo com IA.')}</p>
-      <div class="actions"><button class="btn sm secondary" data-action="generate-initial-plan">Criar treino inteligente</button><button class="btn sm ${p.progress>=workoutsPerCycle(p)?'':'secondary'}" ${p.progress>=workoutsPerCycle(p)?'':'disabled'} data-action="finish-cycle-ai">Revisar próximo ciclo</button></div>
+      <div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title || 'Aguardando treino inteligente')} • ${esc(p.programLabel || programLabelForProfile(p))} • Ciclo ${p.planMeta?.cycle || Math.max(1, cycles+1)}</p></div><span class="badge ${planBadgeClass}">${planBadge}</span></div>
+      <p class="muted">${esc(p.planMeta?.notes || (hasPlan ? 'Use os dados dos treinos para ajustar o próximo ciclo.' : 'Nenhum treino foi carregado ainda. Gere um treino específico com IA ou use o treino padrão.'))}</p>
+      ${renderPlanActions(p)}
     </section>
-    <section class="card">
+    ${hasPlan ? `<section class="card">
       <div class="card-title"><h3>Próximo treino</h3><span class="badge orange">${w.id}</span></div>
       <div class="workout-card current" data-open-workout="${w.id}">
         <div class="workout-left"><div class="letter">${w.id}</div><div class="workout-name"><strong>${esc(w.name)}</strong><span>${w.exercises.length} exercícios • ${esc(w.focus)}</span></div></div>
         <span>›</span>
       </div>
-    </section>
+    </section>` : `<section class="card"><div class="empty"><strong>Nenhum treino ativo ainda.</strong><br>O Gym Bronze vai tentar criar um treino específico com IA. Se der erro, você ainda pode usar o treino padrão para começar.</div></section>`}
     <section class="grid three">
       <div class="stat"><strong>${cycles}</strong><span>ciclos completos</span></div>
       <div class="stat"><strong>${p.history.length}</strong><span>treinos no histórico</span></div>
       <div class="stat"><strong>${p.checkins.length}</strong><span>check-ins salvos</span></div>
     </section>
-    <section class="card">
+    ${hasPlan ? `<section class="card">
       <div class="card-title"><h3>Fila atual</h3><p>Somente o primeiro pode ser concluído</p></div>
       <div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div>
-    </section>`;
+    </section>` : ''}`;
 }
 function pendingHTML(p){ return ''; }
-function workoutQueueCard(p,id,current=false){ const w=workoutById(p,id); return `<div class="workout-card ${current?'current':''}" data-open-workout="${id}"><div class="workout-left"><div class="letter">${id}</div><div class="workout-name"><strong>${esc(w.name)}</strong><span>${current?'Liberado para concluir':'Modo consulta'} • ${w.exercises.length} exercícios</span></div></div><span class="badge ${current?'orange':''}">${current?'Atual':'Bloqueado'}</span></div>`; }
-function renderWorkouts(){ const p=profile(); return `<section class="card"><div class="card-title"><div><h3>Treinos A–E</h3><p>Você pode abrir todos, mas só conclui o treino da ordem.</p></div><button class="btn sm secondary" data-action="edit-current-workout">Editar atual</button></div><div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div></section><section class="card pro-tip"><div><span class="badge orange">PRO</span><h3>Editor liberado</h3><p>Agora você pode editar exercícios, ordem, nome, tipo e meta de reps direto no app.</p></div></section>`; }
+function workoutQueueCard(p,id,current=false){ const w=workoutById(p,id); if(!w) return ''; return `<div class="workout-card ${current?'current':''}" data-open-workout="${id}"><div class="workout-left"><div class="letter">${id}</div><div class="workout-name"><strong>${esc(w.name)}</strong><span>${current?'Liberado para concluir':'Modo consulta'} • ${w.exercises.length} exercícios</span></div></div><span class="badge ${current?'orange':''}">${current?'Atual':'Bloqueado'}</span></div>`; }
+function renderWorkouts(){ const p=profile(); if(!hasWorkoutPlan(p)) return `<section class="card"><div class="card-title"><div><h3>Nenhum treino ativo</h3><p>Gere um treino específico ou use o treino padrão para começar.</p></div></div><div class="actions"><button class="btn" data-action="generate-initial-plan">Gerar treino específico</button><button class="btn secondary" data-action="use-default-plan">Usar treino padrão</button></div></section>`; return `<section class="card"><div class="card-title"><div><h3>Treinos</h3><p>Você pode abrir todos, mas só conclui o treino da ordem.</p></div><button class="btn sm secondary" data-action="edit-current-workout">Editar atual</button></div><div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div></section><section class="card pro-tip"><div><span class="badge orange">PRO</span><h3>Editor liberado</h3><p>Agora você pode editar exercícios, ordem, nome, tipo e meta de reps direto no app.</p></div></section>`; }
 
 function renderProgress(){
   const p=profile(); const gains = exerciseGains(p); const cycles=currentCycleNumber(p);
@@ -658,7 +688,7 @@ function bindScreen(){
   document.querySelectorAll('[data-switch-profile]').forEach(el=>el.onclick=()=>{state.activeProfileId=el.dataset.switchProfile; save(); render();});
 }
 function handleAction(a){
-  if(a==='start-current') openWorkout(currentWorkout().id);
+  if(a==='start-current'){ const w=currentWorkout(); if(!w) return toast('Gere um treino primeiro.'); openWorkout(w.id); }
   if(a==='new-profile') createProfileFlow();
   if(a==='save-profile') saveProfileForm();
   if(a==='backup') exportBackup();
@@ -666,14 +696,16 @@ function handleAction(a){
   if(a==='reset-profile') resetProfileFlow();
   if(a==='new-checkin') openCheckinModal();
   if(a==='new-bio') openBioModal();
-  if(a==='edit-current-workout') openEditWorkout(currentWorkout().id);
+  if(a==='edit-current-workout'){ const w=currentWorkout(); if(!w) return toast('Gere um treino primeiro.'); openEditWorkout(w.id); }
   if(a==='test-ai') testAIConnection();
   if(a==='cloud-login') cloudLogin();
   if(a==='cloud-signup') cloudSignup();
   if(a==='cloud-logout') cloudLogout();
   if(a==='cloud-sync') syncLocalHistoryToCloud();
   if(a==='cloud-refresh') refreshLocalOrCloudStatus();
-  if(a==='generate-initial-plan') generateInitialPlanFromAI({silent:false, force:true});
+  if(a==='generate-initial-plan') generateInitialPlanFromAI({silent:false, force:true, fallbackDefault:true});
+  if(a==='use-default-plan') { applyDefaultPlanForProfile(profile(), true); save(); render(); toast('Treino padrão aplicado.'); }
+  if(a==='accept-default-plan') { const p=profile(); if(p.planMeta) p.planMeta.needsDefaultChoice=false; save(); render(); toast('Treino padrão mantido.'); }
   if(a==='finish-cycle-ai') finishCycleAndGeneratePlan();
   if(a==='generate-diet-plan') generateDietPlan();
 }
@@ -686,7 +718,7 @@ function saveProfileForm(){
   document.querySelectorAll('[data-profile-field]').forEach(f=>p[f.dataset.profileField]=f.value);
   p.experience = normalizeExperienceLabel(p.experience);
   p.daysPerWeek = String(clampTrainingDays(p.daysPerWeek));
-  if(p.planMeta?.source !== 'ai' && !(p.history&&p.history.length) && (beforeDays !== p.daysPerWeek || beforeExp !== p.experience)){
+  if(p.planMeta?.source === 'default' && !(p.history&&p.history.length) && (beforeDays !== p.daysPerWeek || beforeExp !== p.experience)){
     applyDefaultPlanForProfile(p, true);
   }
   document.querySelectorAll('[data-ai-field]').forEach(f=>{
@@ -1055,14 +1087,14 @@ function buildPlanAIPayload(mode='initial', extra={}){
     cycleChangeRequest: extra.cycleChangeRequest || '',
     profile:{name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
     planRules:{daysPerWeek:clampTrainingDays(p.daysPerWeek), level:normalizeExperienceLabel(p.experience), programWeeks:programWeeksForExperience(p.experience), targetWorkouts:targetWorkoutsForProfile(p), programLabel:programLabelForProfile(p), allowedWorkoutIds:WORKOUT_LETTERS.slice(0, clampTrainingDays(p.daysPerWeek))},
-    defaultTemplate:templateForProfile(p),
-    currentPlan:{title:p.planMeta?.title, cycle:p.planMeta?.cycle, source:p.planMeta?.source, workouts:p.workouts},
+    currentPlan:{title:p.planMeta?.title, cycle:p.planMeta?.cycle, source:p.planMeta?.source, workouts:p.planMeta?.source==='ai'?p.workouts:[]},
     progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, currentCycleNumber(p)+1)},
     recentHistory:p.history.slice(-12).map(h=>({date:h.date, workoutId:h.workoutId, workoutName:h.workoutName, score:h.score, doneCount:h.doneCount, skippedCount:h.skippedCount, weights:h.weights, status:h.status, meta:h.meta, aiReport:h.aiReport}))
   };
 }
 function normalizeAIPlan(plan, mode='initial'){
-  const list = Array.isArray(plan?.workouts) ? plan.workouts : [];
+  if(!Array.isArray(plan?.workouts) || !plan.workouts.length) throw new Error('A IA não retornou uma lista de treinos válida.');
+  const list = plan.workouts;
   const ids = WORKOUT_LETTERS.slice(0, clampTrainingDays(profile().daysPerWeek));
   const workouts = ids.map((id, idx)=>{
     const source = list.find(w=>String(w.id||'').toUpperCase()===id) || list[idx] || null;
@@ -1121,7 +1153,13 @@ async function generateInitialPlanFromAI(opts={}){
     if(!opts.silent) toast('Treino de adaptação criado pela IA.');
   }catch(e){
     console.warn('Plano IA falhou:', e);
-    if(!opts.silent) toast('Não consegui gerar o treino com IA. Mantive o treino padrão.');
+    if(opts.fallbackDefault !== false){
+      applyDefaultPlanForProfile(p, true);
+      render();
+      if(!opts.silent) toast('Não consegui gerar o treino com IA. Apliquei o treino padrão por enquanto.');
+    } else if(!opts.silent) {
+      toast('Não consegui gerar o treino com IA.');
+    }
   }
 }
 function askCycleChangeRequest(){
