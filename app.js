@@ -228,8 +228,7 @@ let activeModalWorkout = null;
 let onboardingView = 'login';
 
 function defaultState(){
-  const initialProfile = newProfile('');
-  return { activeProfileId: initialProfile.id, profiles: [initialProfile], version: 4, onboardingDone: false, entryMode: null, pendingEmailVerification: null };
+  return { activeProfileId: null, profiles: [], version: 4, onboardingDone: false, entryMode: null, pendingEmailVerification: null };
 }
 function newProfile(name='Novo perfil'){
   const p = {
@@ -247,6 +246,13 @@ function hasMeaningfulProfileData(p){
 }
 function migrateState(s){
   if(!s || !Array.isArray(s.profiles)) s = defaultState();
+  if(!s.profiles.length){
+    s.activeProfileId = null;
+    s.onboardingDone = false;
+    s.entryMode = null;
+  } else if(!s.activeProfileId || !s.profiles.some(p=>p.id===s.activeProfileId)){
+    s.activeProfileId = s.profiles[0].id;
+  }
   if(typeof s.onboardingDone !== 'boolean') s.onboardingDone = s.profiles.some(hasMeaningfulProfileData);
   if(!('entryMode' in s)) s.entryMode = s.onboardingDone ? 'local' : null;
   if(!('pendingEmailVerification' in s)) s.pendingEmailVerification = null;
@@ -254,7 +260,8 @@ function migrateState(s){
   return s;
 }
 function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-function profile(){ const p = state.profiles.find(p=>p.id===state.activeProfileId) || state.profiles[0]; return ensureProfile(p); }
+function hasActiveProfile(){ return !!(state.profiles && state.profiles.length && state.profiles.some(p=>p.id===state.activeProfileId)); }
+function profile(){ const p = state.profiles.find(p=>p.id===state.activeProfileId) || state.profiles[0] || null; return ensureProfile(p); }
 function ensureProfile(p){
   if(!p) return p;
   if(!p.ai) p.ai={autoWorkoutReport:true};
@@ -608,6 +615,7 @@ function cloudStatusHTML(){
 function isOffline(){ return !navigator.onLine; }
 function canUseOnlineAI(){ return !!(AI_BACKEND_URL && !isOffline() && cloudUser); }
 function shouldShowOnboarding(){
+  if(!state.profiles || !state.profiles.length || !state.activeProfileId) return true;
   if(state.pendingEmailVerification && !cloudUser) return true;
 
   // Se o usuário já passou pelo onboarding e tem dados salvos neste aparelho,
@@ -1354,7 +1362,21 @@ function saveProfileForm(){
   if(hasCloudAccount()) upsertCloudProfile(p.name || 'Usuário').catch(()=>{});
   toast('Perfil salvo.'); render();
 }
-function createProfileFlow(){ const name=prompt('Nome do novo perfil:'); if(!name) return; const p=newProfile(name); state.profiles.push(p); state.activeProfileId=p.id; save(); render(); toast('Perfil criado.'); }
+async function createProfileFlow(){
+  if(supabaseClient){
+    try{ await supabaseClient.auth.signOut(); }catch(e){}
+  }
+  cloudUser=null;
+  state.activeProfileId=null;
+  state.onboardingDone=false;
+  state.entryMode=null;
+  state.pendingEmailVerification=null;
+  onboardingView='login';
+  screen='home';
+  save();
+  render();
+  toast('Entre ou crie uma conta para adicionar um novo perfil.');
+}
 function resetProfileFlow(){ const p=profile(); if(!confirm(`Resetar TODO o perfil ${p.name || 'Perfil'}? Isso apaga treinos, cargas, histórico, check-ins e bioimpedância.`)) return; const t=prompt('Digite RESETAR para confirmar:'); if(t!=='RESETAR') return toast('Reset cancelado.'); const fresh=newProfile(p.name); fresh.id=p.id; state.profiles[state.profiles.findIndex(x=>x.id===p.id)] = fresh; save(); render(); toast('Perfil resetado.'); }
 
 
@@ -1497,7 +1519,15 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
 
 }
 
-function openProfileSwitcher(){ const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Perfil</p><h2>Quem está treinando?</h2></div><button class="close" data-close>×</button></div><div class="profile-list">${state.profiles.map(p=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((p.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(p.name || 'Perfil')}</strong><div class="small">${levelFromXp(ensureGamification(p).xp).rank.name} • Nv. ${levelFromXp(ensureGamification(p).xp).roman}</div></div></div><button class="btn sm ${p.id===state.activeProfileId?'green':'secondary'}" data-modal-switch-profile="${p.id}">${p.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div><div class="actions"><button class="btn" data-modal-new-profile>Novo perfil</button></div></div>`; layer.classList.remove('hidden'); document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=()=>{state.activeProfileId=b.dataset.modalSwitchProfile; save(); closeModal();}); document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();}; }
+function openProfileSwitcher(){
+  const layer=byId('modalLayer');
+  const list=(state.profiles||[]).map(p=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((p.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(p.name || 'Perfil')}</strong><div class="small">${p.accountEmail?esc(p.accountEmail)+' • ':''}${levelFromXp(ensureGamification(p).xp).rank.name} • Nv. ${levelFromXp(ensureGamification(p).xp).roman}</div></div></div><button class="btn sm ${p.id===state.activeProfileId?'green':'secondary'}" data-modal-switch-profile="${p.id}">${p.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('');
+  layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Perfil</p><h2>Quem está treinando?</h2><p class="muted">Cada conta fica separada neste aparelho.</p></div><button class="close" data-close>×</button></div><div class="profile-list">${list || '<div class="empty">Nenhum perfil ativo neste aparelho.</div>'}</div><div class="actions"><button class="btn" data-modal-new-profile>Adicionar novo perfil</button></div></div>`;
+  layer.classList.remove('hidden');
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
+  document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=()=>{state.activeProfileId=b.dataset.modalSwitchProfile; state.onboardingDone=true; state.entryMode=state.entryMode||'account'; save(); closeModal(); render();});
+  document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();};
+}
 
 function openCheckinModal(){ const p=profile(), cycle=currentCycleNumber(p); const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Check-in</p><h2>Ciclo ${cycle}</h2><p class="muted">Tente usar sempre a mesma luz, pose e distância.</p></div><button class="close" data-close>×</button></div><div class="form-grid">${inputPlain('checkWeight','Peso do dia')} ${inputPlain('checkWaist','Cintura')}<div class="field" style="grid-column:1/-1"><label>Observação do ciclo</label><textarea id="checkNotes"></textarea></div></div><div class="photo-grid"><label class="photo-box"><span>Frente<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="front" hidden></label><label class="photo-box"><span>Lado<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="side" hidden></label><label class="photo-box"><span>Costas<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="back" hidden></label></div><div class="actions"><button class="btn" data-save-checkin>Salvar check-in</button><button class="btn secondary" data-close>Cancelar</button></div></div>`; layer.classList.remove('hidden'); const photos={}; document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-photo]').forEach(inp=>inp.onchange=async()=>{ const img=await compressImage(inp.files[0]); photos[inp.dataset.photo]=img; inp.parentElement.innerHTML=`<img src="${img}" alt="foto ${inp.dataset.photo}">`; }); document.querySelector('[data-save-checkin]').onclick=()=>{ p.checkins.push({id:'c_'+Date.now(), date:nowISO(), cycle, weight:byId('checkWeight').value, waist:byId('checkWaist').value, notes:byId('checkNotes').value, photos}); save(); closeModal(); toast('Check-in salvo.'); }; }
 function inputPlain(id,label){ return `<div class="field"><label>${label}</label><input class="input" id="${id}"></div>`; }
