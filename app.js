@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '6.3.1';
+const APP_VERSION = '6.5.0';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -213,6 +213,8 @@ function applyDefaultPlanForProfile(p, force=false){
   p.queue = p.workouts.map(w=>w.id);
   p.tempDone = {};
   p.tempStatus = {};
+  p.tempTimes = {};
+  p.activeWorkoutSession = null;
   p.planMeta = {source:'default', cycle:p.planMeta?.cycle || 1, title:`Treino padrão • ${plan.title}`, notes:'Treino padrão aplicado como fallback. Você pode manter este treino ou pedir um treino específico com IA.', updatedAt:nowISO(), needsDefaultChoice:true};
 }
 function workoutsPerCycle(p=profile()){
@@ -274,6 +276,8 @@ function ensureProfile(p){
   if(!Array.isArray(p.gamification.xpEvents)) p.gamification.xpEvents=[];
   if(!Number.isFinite(Number(p.gamification.xp))) p.gamification.xp=0;
   if(!p.gamification.lastLevelSeen) p.gamification.lastLevelSeen=levelFromXp(p.gamification.xp).level;
+  if(!p.tempTimes) p.tempTimes={};
+  if(!('activeWorkoutSession' in p)) p.activeWorkoutSession=null;
   if(p.planMeta?.source === 'default' && p.planMeta.needsDefaultChoice === undefined) p.planMeta.needsDefaultChoice = true;
   if(!('experience' in p)) p.experience='';
   if(!('daysPerWeek' in p)) p.daysPerWeek='';
@@ -281,6 +285,7 @@ function ensureProfile(p){
   p.ai.apiUrl = AI_BACKEND_URL;
   if(typeof p.ai.autoWorkoutReport !== 'boolean') p.ai.autoWorkoutReport = true;
   if(!Array.isArray(p.history)) p.history=[];
+  if(!Array.isArray(p.dailyCheckins)) p.dailyCheckins=[];
   if(!Array.isArray(p.checkins)) p.checkins=[];
   if(!Array.isArray(p.bio)) p.bio=[];
   return p;
@@ -288,6 +293,16 @@ function ensureProfile(p){
 function nowISO(){ return new Date().toISOString(); }
 function todayBR(d=new Date()){ return d.toLocaleDateString('pt-BR'); }
 function fmtDate(iso){ return new Date(iso).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit', year:'numeric'}); }
+function fmtTime(iso){
+  if(!iso) return '';
+  const d=new Date(iso);
+  if(Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+}
+function fmtDateTime(iso){
+  if(!iso) return '';
+  return `${fmtDate(iso)} às ${fmtTime(iso)}`;
+}
 function byId(id){ return document.getElementById(id); }
 function esc(s){ return String(s ?? '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 function workoutById(p,id){ return p.workouts.find(w=>w.id===id); }
@@ -321,14 +336,44 @@ function checkinDoneToday(p=profile()){
   const today=dateKey();
   return (p.checkins||[]).some(c=>dateKey(c.date||0)===today);
 }
+function dailyCheckinToday(p=profile()){
+  const today=dateKey();
+  return (p.dailyCheckins||[]).find(c=>c.dateKey===today || dateKey(c.date||0)===today) || null;
+}
+function readinessLabel(c){
+  if(!c) return 'não feito';
+  const score=Number(c.readinessScore||0);
+  if(score>=80) return 'pronto para render';
+  if(score>=60) return 'ok, treina controlado';
+  if(score>=40) return 'dia moderado';
+  return 'recuperação';
+}
+function calcReadinessScore(c){
+  const energy=Number(c.energy||3);
+  const sleep=Number(c.sleep||3);
+  const motivation=Number(c.motivation||3);
+  const pain=Number(c.pain||1);
+  const stress=Number(c.stress||3);
+  const hunger=Number(c.hunger||3);
+  const positive=(energy+sleep+motivation)/15*70;
+  const recovery=(6-pain)/5*15;
+  const stressPart=(6-stress)/5*10;
+  const hungerPart=(6-Math.abs(hunger-3))/5*5;
+  return Math.max(0, Math.min(100, Math.round(positive+recovery+stressPart+hungerPart)));
+}
+function recentDailyCheckins(p=profile(), n=7){
+  return [...(p.dailyCheckins||[])].slice(-n).reverse();
+}
 function dailyScore(p=profile()){
   const hasPlan=hasWorkoutPlan(p);
   const train=workoutDoneToday(p);
-  const check=checkinDoneToday(p);
+  const check=!!dailyCheckinToday(p);
+  const photoCheck=checkinDoneToday(p);
   const hasDiet=!!p.dietPlan;
   let score=0;
-  if(train) score+=55;
-  if(check) score+=20;
+  if(train) score+=50;
+  if(check) score+=25;
+  else if(photoCheck) score+=15;
   if(hasDiet) score+=15;
   if(hasPlan) score+=10;
   return Math.min(100,score);
@@ -384,10 +429,11 @@ function todayMissionHTML(p=profile()){
   const weekPct=Math.min(100,Math.round((weekDone/Math.max(1,weekTarget))*100));
   const score=dailyScore(p);
   const meal=nextDietMeal(p);
+  const daily=dailyCheckinToday(p);
   const levelInfo=levelFromXp(ensureGamification(p).xp);
   const missionTitle=done ? 'Missão do dia cumprida' : hasPlan ? 'Missão de hoje' : 'Monte sua missão';
   const missionText=done
-    ? `Treino ${todayRecord?.workoutId || ''} finalizado hoje. Mantém o ritmo, Warrior.`
+    ? `Treino ${todayRecord?.workoutId || ''} finalizado hoje às ${fmtTime(todayRecord?.finishedAt || todayRecord?.date)}. Mantém o ritmo, Warrior.`
     : hasPlan ? `Próximo treino: ${w.id} — ${w.name}.`
     : 'Gere um treino específico para começar sua jornada.';
   return `<section class="today-hero">
@@ -395,7 +441,7 @@ function todayMissionHTML(p=profile()){
       <p class="eyebrow">Hoje</p>
       <h2>${esc(missionTitle)}</h2>
       <p>${esc(missionText)}</p>
-      <div class="today-actions">${done?'<button class="btn secondary" data-screen-go="progress">Ver progresso</button>':hasPlan?`<button class="btn" data-action="start-current">Iniciar ${w.id}</button>`:`<button class="btn" data-action="generate-initial-plan">Gerar treino</button>`}<button class="btn secondary" data-action="open-levels">Nv. ${levelInfo.roman}</button></div>
+      <div class="today-actions">${done?'<button class="btn secondary" data-screen-go="progress">Ver progresso</button>':hasPlan?`<button class="btn" data-action="start-current">Iniciar ${w.id}</button>`:`<button class="btn" data-action="generate-initial-plan">Gerar treino</button>`}<button class="btn secondary" data-action="daily-checkin">${daily?'Editar check-in':'Check-in rápido'}</button><button class="btn secondary" data-action="open-levels">Nv. ${levelInfo.roman}</button></div>
     </div>
     <div class="today-score">
       <div class="progress-ring small-ring" style="--p:${score}%"><div class="progress-ring-inner">${score}<small>score</small></div></div>
@@ -404,16 +450,16 @@ function todayMissionHTML(p=profile()){
   </section>
   <section class="today-grid">
     <div class="today-card ${done?'done':''}">
-      <div><strong>${done?'Treino feito':'Treino'}</strong><span>${hasPlan?esc(done ? (todayRecord?.workoutName||'Finalizado') : `${w.id} — ${w.name}`):'Sem plano ativo'}</span></div>
+      <div><strong>${done?'Treino feito':'Treino'}</strong><span>${hasPlan?esc(done ? `${todayRecord?.workoutName||'Finalizado'} • ${fmtTime(todayRecord?.finishedAt||todayRecord?.date)}` : `${w.id} — ${w.name}`):'Sem plano ativo'}</span></div>
       <b>${done?'✓':'🏋️'}</b>
     </div>
     <div class="today-card">
       <div><strong>Semana</strong><span>${weekDone}/${weekTarget} treinos</span></div>
       <b>${weekPct}%</b>
     </div>
-    <div class="today-card ${checkinDoneToday(p)?'done':''}">
-      <div><strong>Check-in</strong><span>${checkinDoneToday(p)?'feito hoje':'opcional hoje'}</span></div>
-      <b>${checkinDoneToday(p)?'✓':'📸'}</b>
+    <div class="today-card ${daily?'done':''}" data-action="daily-checkin">
+      <div><strong>Check-in diário</strong><span>${daily ? readinessLabel(daily)+' • '+daily.readinessScore+'%' : 'sono, energia e dor'}</span></div>
+      <b>${daily?'✓':'⚡'}</b>
     </div>
     <div class="today-card">
       <div><strong>Nutri</strong><span>${meal ? esc((meal.time?meal.time+' • ':'')+meal.title) : (p.dietPlan ? 'rotina salva' : 'sem rotina ainda')}</span></div>
@@ -1356,7 +1402,12 @@ function stagnated(p){
 
 function renderCheckin(){
   const p=profile();
-  return `<section class="card"><div class="card-title"><h3>Check-in físico</h3><p>Fotos e dados corporais por ciclo.</p></div>
+  const todayDaily=dailyCheckinToday(p);
+  return `<section class="card"><div class="card-title"><div><h3>Check-in diário</h3><p>Sono, energia, dor, fome e estresse. Ajuda a IA a ajustar treino e nutri.</p></div><span class="badge ${todayDaily?'green':'yellow'}">${todayDaily?'Hoje feito':'Pendente'}</span></div>
+    <div class="actions"><button class="btn" data-action="daily-checkin">${todayDaily?'Editar check-in de hoje':'Fazer check-in rápido'}</button></div>
+    ${recentDailyCheckins(p,7).length?`<div class="daily-list">${recentDailyCheckins(p,7).map(c=>`<div class="history-row"><div><strong>${fmtDate(c.date)} — ${readinessLabel(c)}</strong><span>Score ${c.readinessScore}% • Sono ${c.sleep}/5 • Energia ${c.energy}/5 • Dor ${c.pain}/5 • Estresse ${c.stress}/5</span>${c.notes?`<p class="muted">${esc(c.notes)}</p>`:''}</div><span class="badge orange">${fmtTime(c.date)}</span></div>`).join('')}</div>`:'<div class="empty">Nenhum check-in diário ainda.</div>'}
+  </section>
+  <section class="card"><div class="card-title"><h3>Check-in físico</h3><p>Fotos e dados corporais por ciclo.</p></div>
     <div class="actions"><button class="btn" data-action="new-checkin">Novo check-in</button><button class="btn secondary" data-action="new-bio">Inserir bioimpedância</button></div>
   </section>
   <section class="card"><div class="card-title"><h3>Fotos por ciclo</h3></div>${p.checkins.length?`<div class="grid">${p.checkins.slice().reverse().map(c=>`<div class="stat"><strong>Ciclo ${c.cycle}</strong><span>${fmtDate(c.date)} • ${c.weight?c.weight+' kg':''}</span><div class="timeline">${['front','side','back'].map(k=>c.photos?.[k]?`<img class="mini-photo" src="${c.photos[k]}" alt="${k}">`:'' ).join('')}</div></div>`).join('')}</div>`:'<div class="empty">Nenhum check-in salvo ainda.</div>'}</section>
@@ -1402,7 +1453,8 @@ function aiHistoryHTML(h){
 function historyRowHTML(h){
   const aiBadge = h.aiReport ? '<span class="badge green">IA</span>' : h.aiReportStatus==='pending' ? '<span class="badge yellow">IA...</span>' : h.aiReportError ? '<span class="badge red">IA erro</span>' : '';
   const report = h.aiReport ? `<div class="ai-report compact"><p>${esc(h.aiReport.summary||'Relatório salvo.')}</p>${h.aiReport.nextGoal?`<p><b>Meta:</b> ${esc(h.aiReport.nextGoal)}</p>`:''}</div>` : '';
-  return `<div class="history-row"><div><strong>${h.workoutId} — ${esc(h.workoutName)}</strong><span>${fmtDate(h.date)} • ${h.doneCount} concluídos • ${h.skippedCount} pulados</span>${report}</div><div class="badge-stack"><span class="badge">${h.score}%</span>${aiBadge}</div></div>`;
+  const timeInfo = h.startedAt ? `${fmtDate(h.date)} • ${fmtTime(h.startedAt)}–${fmtTime(h.finishedAt||h.date)}${h.durationMinutes!==undefined ? ' • '+h.durationMinutes+' min' : ''}` : `${fmtDate(h.date)} • ${fmtTime(h.date)}`;
+  return `<div class="history-row"><div><strong>${h.workoutId} — ${esc(h.workoutName)}</strong><span>${timeInfo} • ${h.doneCount} concluídos • ${h.skippedCount} pulados</span>${report}</div><div class="badge-stack"><span class="badge">${h.score}%</span>${aiBadge}</div></div>`;
 }
 
 
@@ -1493,6 +1545,7 @@ function handleAction(a){
   if(a==='import-backup') byId('backupInput').click();
   if(a==='reset-profile') resetProfileFlow();
   if(a==='new-checkin') openCheckinModal();
+  if(a==='daily-checkin') openDailyCheckinModal();
   if(a==='new-bio') openBioModal();
   if(a==='edit-current-workout'){ const w=currentWorkout(); if(!w) return toast('Gere um treino primeiro.'); openEditWorkout(w.id); }
   if(a==='test-ai') testAIConnection();
@@ -1565,6 +1618,8 @@ function exerciseHTML(p,w,e,isCurrent){
   const done=!!p.tempDone[e.id];
   const status=p.tempStatus[e.id];
   const m=p.exerciseMeta[e.id] || {};
+  const t=p.tempTimes?.[e.id] || {};
+  const statusTime = t.completedAt ? `Concluído às ${fmtTime(t.completedAt)}` : t.skippedAt ? `Pulado às ${fmtTime(t.skippedAt)}` : '';
   const weight=p.weights[e.id] || '';
   const locked=!isCurrent;
   const kind=exerciseKind(e);
@@ -1603,7 +1658,7 @@ function exerciseHTML(p,w,e,isCurrent){
   const kindLabel = kind==='cardio' ? 'cardio' : kind==='core' ? 'core' : kind==='mobility' ? 'mobilidade' : (e.type||'força');
   return `<div class="exercise ${done?'done':''} ${status==='skipped'?'skipped':''}" data-exercise-card="${e.id}">
     <div class="exercise-top">
-      <div><h4>${esc(e.name)}</h4><div class="small">${esc(kindLabel)} • meta ${esc(e.target||'4x12')}</div></div>
+      <div><h4>${esc(e.name)}</h4><div class="small">${esc(kindLabel)} • meta ${esc(e.target||'4x12')}${statusTime ? ' • '+esc(statusTime) : ''}</div></div>
       <span class="badge ${done?'green':status==='skipped'?'yellow':''}">${done?'Concluído':status==='skipped'?'Pulado':isCurrent?'Pendente':'Consulta'}</span>
     </div>
     <div class="exercise-controls ${kind==='cardio'?'cardio-controls':''}">
@@ -1619,6 +1674,11 @@ function exerciseHTML(p,w,e,isCurrent){
 function openWorkout(id){
   activeModalWorkout=id;
   const p=profile(); const w=workoutById(p,id); const isCurrent=p.queue[0]===id; const layer=byId('modalLayer');
+  if(isCurrent && (!p.activeWorkoutSession || p.activeWorkoutSession.id!==id)){
+    p.activeWorkoutSession={id, startAt:nowISO()};
+    if(!p.tempTimes) p.tempTimes={};
+    save();
+  }
   layer.innerHTML = `<div class="modal"><div class="modal-head"><div><p class="eyebrow">${isCurrent?'Treino liberado':'Modo consulta'}</p><h2>${w.id} — ${esc(w.name)}</h2><p class="muted">${isCurrent?'Você pode concluir exercícios e finalizar.':'Você pode consultar cargas, mas não concluir fora da ordem.'}</p></div><button class="close" data-close>×</button></div>
   <div class="actions modal-actions-top"><button class="btn sm secondary" data-edit-workout="${w.id}">Editar treino</button><button class="btn sm secondary" data-close>Fechar</button></div>
   ${w.exercises.map(e=>exerciseHTML(p,w,e,isCurrent)).join('')}
@@ -1673,20 +1733,50 @@ function meta(id){ const p=profile(); if(!p.exerciseMeta[id]) p.exerciseMeta[id]
 function modalScrollTop(){ const m=document.querySelector('#modalLayer .modal'); return m ? m.scrollTop : 0; }
 function restoreModalScroll(y){ requestAnimationFrame(()=>{ const m=document.querySelector('#modalLayer .modal'); if(m) m.scrollTop = y || 0; }); }
 function refreshWorkoutKeepingScroll(){ const y=modalScrollTop(); openWorkout(activeModalWorkout); restoreModalScroll(y); }
-function toggleDone(id){ const p=profile(); p.tempDone[id]=!p.tempDone[id]; if(p.tempDone[id]) p.tempStatus[id]='done'; else delete p.tempStatus[id]; save(); refreshWorkoutKeepingScroll(); }
-function skipExercise(id){ const p=profile(); p.tempDone[id]=false; p.tempStatus[id]='skipped'; save(); refreshWorkoutKeepingScroll(); }
+function toggleDone(id){
+  const p=profile();
+  if(!p.tempTimes) p.tempTimes={};
+  p.tempDone[id]=!p.tempDone[id];
+  if(p.tempDone[id]){
+    p.tempStatus[id]='done';
+    p.tempTimes[id]={...(p.tempTimes[id]||{}), status:'done', completedAt:nowISO()};
+  }else{
+    delete p.tempStatus[id];
+    delete p.tempTimes[id];
+  }
+  save();
+  refreshWorkoutKeepingScroll();
+}
+function skipExercise(id){
+  const p=profile();
+  if(!p.tempTimes) p.tempTimes={};
+  p.tempDone[id]=false;
+  p.tempStatus[id]='skipped';
+  p.tempTimes[id]={...(p.tempTimes[id]||{}), status:'skipped', skippedAt:nowISO()};
+  save();
+  refreshWorkoutKeepingScroll();
+}
 function closeModal(){ byId('modalLayer').classList.add('hidden'); byId('modalLayer').innerHTML=''; render(); }
 function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toast(`Bloqueado. O próximo treino correto é ${p.queue[0]}.`); const w=workoutById(p,id); const doneCount=w.exercises.filter(e=>p.tempDone[e.id]).length; const skippedCount=w.exercises.filter(e=>p.tempStatus[e.id]==='skipped').length;
   if(!confirm(`Finalizar o treino ${id}?\n\nConcluídos: ${doneCount}\nPulados: ${skippedCount}`)) return;
-  const weights={}, status={}, metaSnap={}; w.exercises.forEach(e=>{ if(p.weights[e.id]) weights[e.id]=p.weights[e.id]; if(p.tempStatus[e.id]) status[e.id]=p.tempStatus[e.id]; if(p.exerciseMeta[e.id]) metaSnap[e.id]={...p.exerciseMeta[e.id]}; });
+  const weights={}, status={}, metaSnap={};
+  w.exercises.forEach(e=>{
+    if(p.weights[e.id]) weights[e.id]=p.weights[e.id];
+    if(p.tempStatus[e.id]) status[e.id]=p.tempStatus[e.id];
+    const metaObj={...(p.exerciseMeta[e.id]||{}), ...(p.tempTimes?.[e.id]||{})};
+    if(Object.keys(metaObj).length) metaSnap[e.id]=metaObj;
+  });
+  const startedAt = p.activeWorkoutSession?.id===id ? p.activeWorkoutSession.startAt : nowISO();
+  const finishedAt = nowISO();
+  const durationMinutes = Math.max(0, Math.round((new Date(finishedAt)-new Date(startedAt))/60000));
   const score = Math.max(0, Math.round(((doneCount + skippedCount*.35) / w.exercises.length) * 100));
-  const record = {id:'h_'+Date.now(), date:nowISO(), workoutId:id, workoutName:w.name, doneCount, skippedCount, score, weights, status, meta:metaSnap};
+  const record = {id:'h_'+Date.now(), date:finishedAt, startedAt, finishedAt, durationMinutes, workoutId:id, workoutName:w.name, doneCount, skippedCount, score, weights, status, meta:metaSnap};
   const xpInfo = awardWorkoutXP(p,w,record);
   if(aiConfigured(p) && p.ai.autoWorkoutReport && canUseOnlineAI()) record.aiReportStatus='pending';
   else if(p.ai.autoWorkoutReport && isOffline()) record.aiReportError='IA pausada: você estava offline.';
   else if(p.ai.autoWorkoutReport && !cloudUser) record.aiReportError='IA pausada: entre na conta para gerar relatório.';
   p.history.push(record);
-  p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={};
+  p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={}; p.tempTimes={}; p.activeWorkoutSession=null;
   save(); closeModal(); toast(record.aiReportStatus==='pending' ? levelUpToast(xpInfo)+' Gerando relatório com IA...' : (isOffline() ? levelUpToast(xpInfo)+' Salvo offline neste aparelho.' : levelUpToast(xpInfo)));
   if(record.aiReportStatus==='pending') generateWorkoutAIReport(p.id, record.id);
   else saveWorkoutToCloud(p, record, {silent:true});
@@ -1711,6 +1801,50 @@ function openProfileSwitcher(){
   document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();};
 }
 
+function rangeField(id,label,value=3,help=''){
+  return `<div class="field range-field"><label>${label}</label><input type="range" min="1" max="5" step="1" id="${id}" value="${esc(value||3)}"><small>${help}</small></div>`;
+}
+function openDailyCheckinModal(){
+  const p=profile();
+  const existing=dailyCheckinToday(p) || {};
+  const layer=byId('modalLayer');
+  layer.innerHTML=`<div class="modal daily-modal"><div class="modal-head"><div><p class="eyebrow">Check-in diário</p><h2>Como você está hoje?</h2><p class="muted">Leva menos de 1 minuto. Isso ajuda o Gym Bronze a entender quando pesar ou aliviar.</p></div><button class="close" data-close>×</button></div>
+    <div class="daily-score-preview"><div class="progress-ring small-ring" style="--p:${existing.readinessScore||0}%"><div class="progress-ring-inner">${existing.readinessScore||'--'}<small>pronto</small></div></div><p>${existing.readinessScore?'Score atual: '+readinessLabel(existing):'Preencha para calcular seu estado de hoje.'}</p></div>
+    <div class="form-grid">
+      ${rangeField('dailySleep','Sono',existing.sleep||3,'1 ruim • 5 ótimo')}
+      ${rangeField('dailyEnergy','Energia',existing.energy||3,'1 sem energia • 5 voando')}
+      ${rangeField('dailyPain','Dor/desconforto',existing.pain||1,'1 sem dor • 5 dor forte')}
+      ${rangeField('dailyHunger','Fome/apetite',existing.hunger||3,'1 sem fome • 5 muita fome')}
+      ${rangeField('dailyStress','Estresse',existing.stress||3,'1 tranquilo • 5 estressado')}
+      ${rangeField('dailyMotivation','Motivação',existing.motivation||3,'1 baixa • 5 alta')}
+      <div class="field" style="grid-column:1/-1"><label>Observação</label><textarea id="dailyNotes" placeholder="ex: dormi mal, ombro incomodando, treino às 12h...">${esc(existing.notes||'')}</textarea></div>
+    </div>
+    <div class="actions"><button class="btn" data-save-daily-checkin>Salvar check-in</button><button class="btn secondary" data-close>Cancelar</button></div>
+  </div>`;
+  layer.classList.remove('hidden');
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
+  document.querySelector('[data-save-daily-checkin]').onclick=()=>{
+    const record={
+      id: existing.id || 'dc_'+Date.now(),
+      date: nowISO(),
+      dateKey: dateKey(),
+      sleep: Number(byId('dailySleep').value),
+      energy: Number(byId('dailyEnergy').value),
+      pain: Number(byId('dailyPain').value),
+      hunger: Number(byId('dailyHunger').value),
+      stress: Number(byId('dailyStress').value),
+      motivation: Number(byId('dailyMotivation').value),
+      notes: byId('dailyNotes').value.trim()
+    };
+    record.readinessScore=calcReadinessScore(record);
+    const idx=(p.dailyCheckins||[]).findIndex(c=>c.dateKey===record.dateKey);
+    if(idx>=0) p.dailyCheckins[idx]=record;
+    else p.dailyCheckins.push(record);
+    save();
+    closeModal();
+    toast('Check-in diário salvo.');
+  };
+}
 function openCheckinModal(){ const p=profile(), cycle=currentCycleNumber(p); const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Check-in</p><h2>Ciclo ${cycle}</h2><p class="muted">Tente usar sempre a mesma luz, pose e distância.</p></div><button class="close" data-close>×</button></div><div class="form-grid">${inputPlain('checkWeight','Peso do dia')} ${inputPlain('checkWaist','Cintura')}<div class="field" style="grid-column:1/-1"><label>Observação do ciclo</label><textarea id="checkNotes"></textarea></div></div><div class="photo-grid"><label class="photo-box"><span>Frente<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="front" hidden></label><label class="photo-box"><span>Lado<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="side" hidden></label><label class="photo-box"><span>Costas<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="back" hidden></label></div><div class="actions"><button class="btn" data-save-checkin>Salvar check-in</button><button class="btn secondary" data-close>Cancelar</button></div></div>`; layer.classList.remove('hidden'); const photos={}; document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-photo]').forEach(inp=>inp.onchange=async()=>{ const img=await compressImage(inp.files[0]); photos[inp.dataset.photo]=img; inp.parentElement.innerHTML=`<img src="${img}" alt="foto ${inp.dataset.photo}">`; }); document.querySelector('[data-save-checkin]').onclick=()=>{ p.checkins.push({id:'c_'+Date.now(), date:nowISO(), cycle, weight:byId('checkWeight').value, waist:byId('checkWaist').value, notes:byId('checkNotes').value, photos}); save(); closeModal(); toast('Check-in salvo.'); }; }
 function inputPlain(id,label){ return `<div class="field"><label>${label}</label><input class="input" id="${id}"></div>`; }
 function compressImage(file){ return new Promise((resolve,reject)=>{ if(!file) return resolve(''); const r=new FileReader(); r.onload=()=>{ const img=new Image(); img.onload=()=>{ const max=900, scale=Math.min(1,max/img.width); const c=document.createElement('canvas'); c.width=Math.round(img.width*scale); c.height=Math.round(img.height*scale); c.getContext('2d').drawImage(img,0,0,c.width,c.height); resolve(c.toDataURL('image/jpeg',.72)); }; img.onerror=reject; img.src=r.result; }; r.onerror=reject; r.readAsDataURL(file); }); }
@@ -1738,6 +1872,8 @@ function buildWorkoutAIPayload(p, h){
     target:e.target,
     status:h.status?.[e.id] || 'not_done',
     weight:h.weights?.[e.id] || '',
+    completedAt:h.meta?.[e.id]?.completedAt || null,
+    skippedAt:h.meta?.[e.id]?.skippedAt || null,
     meta:h.meta?.[e.id] || {}
   }));
   const previousSame=p.history.filter(x=>x.id!==h.id && x.workoutId===h.workoutId).slice(-3).map(x=>({date:x.date, score:x.score, weights:x.weights, status:x.status, meta:x.meta}));
@@ -1747,6 +1883,8 @@ function buildWorkoutAIPayload(p, h){
     workout:{id:h.workoutId, name:h.workoutName, date:h.date, score:h.score, doneCount:h.doneCount, skippedCount:h.skippedCount, exercises:exerciseDetails},
     previousSameWorkout:previousSame,
     latestBio:p.bio?.slice(-1)[0] || null,
+    todayReadiness:dailyCheckinToday(p),
+    recentDailyCheckins:recentDailyCheckins(p,7),
     recentHistory:p.history.slice(-8).map(x=>({date:x.date, workoutId:x.workoutId, workoutName:x.workoutName, score:x.score, doneCount:x.doneCount, skippedCount:x.skippedCount}))
   };
 }
@@ -2143,7 +2281,7 @@ async function saveWorkoutToCloud(p, h, opts={}){
         workout_name:h.workoutName || '',
         cycle_number:currentCycleNumber(p),
         finished_at:h.date || nowISO(),
-        notes:h.notes || null,
+        notes:h.notes || (h.startedAt ? `Início ${fmtTime(h.startedAt)} • Fim ${fmtTime(h.finishedAt||h.date)} • Duração ${h.durationMinutes||0} min` : null),
         local_id:h.id || null
       }).select().single();
       if(error) throw error;
@@ -2160,7 +2298,7 @@ async function saveWorkoutToCloud(p, h, opts={}){
         sets:parseNumberValue(h.meta?.[e.id]?.sets),
         difficulty:h.meta?.[e.id]?.difficulty || null,
         pain:h.meta?.[e.id]?.pain || null,
-        notes:h.meta?.[e.id]?.note || h.meta?.[e.id]?.cardioTime || h.meta?.[e.id]?.coreDone || null,
+        notes:[h.meta?.[e.id]?.note, h.meta?.[e.id]?.completedAt ? `Concluído às ${fmtTime(h.meta[e.id].completedAt)}` : '', h.meta?.[e.id]?.skippedAt ? `Pulado às ${fmtTime(h.meta[e.id].skippedAt)}` : '', h.meta?.[e.id]?.cardioTime ? `Cardio ${h.meta[e.id].cardioTime}` : '', h.meta?.[e.id]?.coreDone ? `Core ${h.meta[e.id].coreDone}` : ''].filter(Boolean).join(' • ') || null,
         skipped:h.status?.[e.id]==='skipped',
         completed:h.status?.[e.id]==='done'
       }));
@@ -2437,7 +2575,9 @@ function buildDietAIPayload(){
     profile:{name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
     currentPlan:{title:p.planMeta?.title, source:p.planMeta?.source, workouts:p.workouts},
     progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, currentCycleNumber(p)+1)},
-    recentHistory:p.history.slice(-10).map(h=>({date:h.date, workoutName:h.workoutName, doneCount:h.doneCount, skippedCount:h.skippedCount, score:h.score, weights:h.weights, meta:h.meta}))
+    todayReadiness:dailyCheckinToday(p),
+    recentDailyCheckins:recentDailyCheckins(p,7),
+    recentHistory:p.history.slice(-10).map(h=>({date:h.date, startedAt:h.startedAt, finishedAt:h.finishedAt || h.date, durationMinutes:h.durationMinutes, workoutName:h.workoutName, doneCount:h.doneCount, skippedCount:h.skippedCount, score:h.score, weights:h.weights, meta:h.meta}))
   };
 }
 async function callDietAI(){

@@ -330,3 +330,47 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
   border-radius:999px;
   padding:4px 8px;
 }
+
+/* v6.4 — horários do treino */
+.exercise .small{
+  line-height:1.45;
+}
+.history-row span{
+  line-height:1.45;
+}
+
+/* v6.5 — Check-in diário rápido */
+.today-card[data-action]{cursor:pointer}
+.range-field input[type=range]{
+  width:100%;
+  accent-color:var(--orange);
+}
+.range-field small{
+  color:var(--muted);
+  font-size:12px;
+  display:block;
+  margin-top:6px;
+}
+.daily-score-preview{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  border:1px solid rgba(255,122,0,.18);
+  background:rgba(255,122,0,.07);
+  border-radius:22px;
+  padding:12px;
+  margin-bottom:14px;
+}
+.daily-score-preview p{
+  margin:0;
+  color:var(--soft);
+  font-weight:800;
+}
+.daily-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.daily-modal textarea{
+  min-height:88px;
+}
