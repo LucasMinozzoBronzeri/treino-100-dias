@@ -222,3 +222,37 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
 /* v6.1 — campos por tipo de exercício e perfis por conta */
 .cardio-controls .field label{color:#ffdca8}
 .exercise .small{text-transform:none}
+
+/* v6.2 — Perfil reorganizado */
+.profile-section{
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:22px;
+  overflow:hidden;
+  background:rgba(20,20,22,.54);
+}
+.profile-section + .profile-section{margin-top:0}
+.profile-section summary{
+  list-style:none;
+  cursor:pointer;
+  padding:16px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  font-weight:900;
+}
+.profile-section summary::-webkit-details-marker{display:none}
+.profile-section summary span{font-size:16px}
+.profile-section summary small{color:var(--muted);font-size:12px;font-weight:700;text-align:right}
+.profile-section summary:after{
+  content:'⌄';
+  color:var(--orange2);
+  font-size:20px;
+  transition:.18s transform;
+}
+.profile-section[open] summary:after{transform:rotate(180deg)}
+.profile-section .card{
+  margin:0 12px 12px;
+  border-radius:18px;
+}
+.danger-zone{border-color:rgba(255,59,59,.25)}

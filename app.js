@@ -1282,27 +1282,75 @@ function historyRowHTML(h){
 }
 
 
-function renderProfile(){ const p=profile(); const ai=p.ai||{}; const levelInfo=levelFromXp(ensureGamification(p).xp); return `<section class="card profile-level-card"><div class="card-title"><div><p class="eyebrow">Warrior</p><h3>${esc(p.name || 'Meu perfil')}</h3><p>${esc(levelInfo.rank.name)} • Nv. ${levelInfo.roman} (${levelInfo.level})</p></div><div class="level-badge big">${esc(levelInfo.rank.icon)}</div></div><div class="xp-bar big"><i style="width:${levelInfo.pct}%"></i></div><p class="muted">${levelInfo.level>=100?'Mr. Gym Bronze desbloqueado.':'Faltam '+levelInfo.toNext+' XP para o próximo nível.'} ${hasCloudAccount()?'XP sincronizável na nuvem.':'XP salvo neste aparelho.'}</p><div class="actions"><button class="btn sm secondary" data-action="open-levels">Ver trilha de patentes</button>${hasCloudAccount()?'<button class="btn sm secondary" data-action="sync-xp-cloud">Salvar XP na nuvem</button>':''}</div></section><section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais. Se entrar na conta, salva também na nuvem.</p></div><div class="form-grid">
-  ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${selectHTML('sex','Sexo',p.sex,['Homem','Mulher','Outro/Prefiro não informar'])}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}${selectHTML('experience','Nível',p.experience,['Iniciante','Intermediário','Avançado'])}${selectHTML('daysPerWeek','Dias por semana',p.daysPerWeek,['2','3','4','5','6'], v=>v+' dias')}<div class="stat"><strong>${esc(p.programLabel || programLabelForProfile(p))}</strong><span>meta do programa</span></div>
-  <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div></div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button><button class="btn secondary" data-action="new-profile">Novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
-  <section class="card"><div class="card-title"><div><h3>Conta e sincronização</h3><p>Sem login o app continua funcionando só neste aparelho. Com login, salva também no Supabase.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}</section>
-  <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Backend configurado no app. Para gerar relatório, o usuário precisa estar logado e online.</p></div><span class="badge green">Pronta</span></div><div class="form-grid">
-    <label class="toggle-row" style="grid-column:1/-1"><input type="checkbox" data-ai-field="autoWorkoutReport" ${ai.autoWorkoutReport?'checked':''}> <span>Gerar relatório automaticamente ao finalizar treino</span></label>
-  </div><div class="actions"><button class="btn" data-action="save-profile">Salvar configuração</button><button class="btn secondary" data-action="test-ai">Testar IA</button></div><p class="muted">Versão correta: não usa APP_TOKEN fixo no frontend. A Vercel valida o login Supabase antes de chamar a IA.</p></section>
-  <section class="card"><div class="card-title"><h3>Perfis</h3><p>${state.profiles.length} perfil(is)</p></div><div class="profile-list">${state.profiles.map(x=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((x.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(x.name || 'Perfil')}</strong><div class="small">${x.progress}/${x.target} treinos</div></div></div><button class="btn sm ${x.id===state.activeProfileId?'green':'secondary'}" data-switch-profile="${x.id}">${x.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div></section>
-  <section class="card legal-card"><div class="card-title"><div><h3>Termos e avisos</h3><p>Transparência para uso público.</p></div><span class="badge yellow">Beta</span></div><div class="legal-text"><p>O Gym Bronze é uma ferramenta de organização, treino e análise. Ele não substitui personal trainer, nutricionista, médico ou fisioterapeuta.</p><p>As sugestões de treino e alimentação são educativas. Interrompa o exercício em caso de dor forte, tontura, falta de ar incomum ou desconforto relevante.</p><p>Dados como idade, peso, altura, objetivo, observações, treinos e relatórios podem ser enviados para serviços externos de IA quando você usa recursos inteligentes.</p></div></section>
-  <section class="card"><div class="card-title"><h3>Zona perigosa</h3></div><button class="btn danger full" data-action="reset-profile">Resetar perfil ativo</button></section>`; }
+function renderProfile(){
+  const p=profile();
+  const ai=p.ai||{};
+  const levelInfo=levelFromXp(ensureGamification(p).xp);
+  const accountLabel = p.accountEmail || cloudUser?.email || 'Conta local';
+  return `<section class="card profile-level-card">
+    <div class="card-title">
+      <div><p class="eyebrow">Warrior</p><h3>${esc(p.name || 'Meu perfil')}</h3><p>${esc(accountLabel)}</p><p>${esc(levelInfo.rank.name)} • Nv. ${levelInfo.roman} (${levelInfo.level})</p></div>
+      <div class="level-badge big">${esc(levelInfo.rank.icon)}</div>
+    </div>
+    <div class="xp-bar big"><i style="width:${levelInfo.pct}%"></i></div>
+    <p class="muted">${levelInfo.level>=100?'Mr. Gym Bronze desbloqueado.':'Faltam '+levelInfo.toNext+' XP para o próximo nível.'} ${hasCloudAccount()?'XP sincronizável na nuvem.':'XP salvo neste aparelho.'}</p>
+    <div class="actions"><button class="btn sm secondary" data-action="open-levels">Ver patentes</button><button class="btn sm secondary" data-action="account-switch">Alternar conta</button>${hasCloudAccount()?'<button class="btn sm secondary" data-action="sync-xp-cloud">Salvar XP na nuvem</button>':''}</div>
+  </section>
+
+  <details class="profile-section" open>
+    <summary><span>Dados pessoais</span><small>nome, idade e corpo</small></summary>
+    <section class="card"><div class="form-grid">
+      ${inputHTML('name','Nome',p.name)}
+      ${inputHTML('age','Idade',p.age,'number')}
+      ${selectHTML('sex','Sexo',p.sex,['Homem','Mulher','Outro/Prefiro não informar'])}
+      ${inputHTML('height','Altura',p.height)}
+      ${inputHTML('weight','Peso inicial/atual',p.weight)}
+    </div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button></div></section>
+  </details>
+
+  <details class="profile-section">
+    <summary><span>Objetivo e treino</span><small>foco, nível e dias</small></summary>
+    <section class="card"><div class="form-grid">
+      ${inputHTML('goal','Objetivo',p.goal)}
+      ${inputHTML('focus','Foco',p.focus)}
+      ${selectHTML('experience','Nível',p.experience,['Iniciante','Intermediário','Avançado'])}
+      ${selectHTML('daysPerWeek','Dias por semana',p.daysPerWeek,['2','3','4','5','6'], v=>v+' dias')}
+      <div class="stat"><strong>${esc(p.programLabel || programLabelForProfile(p))}</strong><span>meta do programa</span></div>
+      <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div>
+    </div><div class="actions"><button class="btn" data-action="save-profile">Salvar treino/perfil</button></div></section>
+  </details>
+
+  <details class="profile-section">
+    <summary><span>Conta e sincronização</span><small>nuvem, backup e troca</small></summary>
+    <section class="card"><div class="card-title"><div><h3>Conta</h3><p>Sincronize histórico, treino, nutri e XP na nuvem.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}<div class="divider"></div><div class="actions"><button class="btn secondary" data-action="account-switch">Alternar conta</button><button class="btn secondary" data-action="new-profile">Adicionar novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
+  </details>
+
+  <details class="profile-section">
+    <summary><span>IA e relatórios</span><small>automação e análise</small></summary>
+    <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Relatórios automáticos e geração inteligente.</p></div><span class="badge green">Pronta</span></div><div class="form-grid">
+      <label class="toggle-row" style="grid-column:1/-1"><input type="checkbox" data-ai-field="autoWorkoutReport" ${ai.autoWorkoutReport?'checked':''}> <span>Gerar relatório automaticamente ao finalizar treino</span></label>
+    </div><div class="actions"><button class="btn" data-action="save-profile">Salvar configuração</button><button class="btn secondary" data-action="test-ai">Testar IA</button></div><p class="muted">A Vercel valida o login Supabase antes de chamar a IA.</p></section>
+  </details>
+
+  <details class="profile-section">
+    <summary><span>Termos e avisos</span><small>beta público</small></summary>
+    <section class="card legal-card"><div class="card-title"><div><h3>Termos e avisos</h3><p>Transparência para uso público.</p></div><span class="badge yellow">Beta</span></div><div class="legal-text"><p>O Gym Bronze é uma ferramenta de organização, treino e análise. Ele não substitui personal trainer, nutricionista, médico ou fisioterapeuta.</p><p>As sugestões de treino e alimentação são educativas. Interrompa o exercício em caso de dor forte, tontura, falta de ar incomum ou desconforto relevante.</p><p>Dados como idade, peso, altura, objetivo, observações, treinos e relatórios podem ser enviados para serviços externos de IA quando você usa recursos inteligentes.</p></div></section>
+  </details>
+
+  <section class="card danger-zone"><div class="card-title"><div><h3>Zona de segurança</h3><p>Ações de saída e limpeza ficam aqui embaixo.</p></div></div><div class="actions">${hasCloudAccount()?'<button class="btn secondary danger-soft" data-action="cloud-logout">Sair e limpar este aparelho</button>': isLocalMode()?'<button class="btn secondary danger-soft" data-action="local-logout">Limpar app local</button>':''}<button class="btn danger" data-action="reset-profile">Resetar perfil ativo</button></div></section>`;
+}
+
 function renderCloudAccount(p){
   const synced = p.history.filter(h=>h.cloudSynced).length;
   const pending = p.history.filter(h=>!h.cloudSynced).length;
   if(hasCloudAccount()){
-    return `<div class="cloud-panel"><p><b>Conta:</b> ${esc(cloudUser.email||'usuário conectado')}</p><p class="muted">Histórico local: ${p.history.length} treino(s) • Na nuvem: ${synced} • Pendentes: ${pending}</p><div class="actions"><button class="btn" data-action="cloud-sync">Sincronizar histórico com a nuvem</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button><button class="btn secondary danger-soft" data-action="cloud-logout">Sair e limpar app</button></div></div>`;
+    return `<div class="cloud-panel"><p><b>Conta conectada:</b> ${esc(cloudUser.email||'usuário conectado')}</p><p class="muted">Histórico local: ${p.history.length} treino(s) • Na nuvem: ${synced} • Pendentes: ${pending}</p><div class="actions"><button class="btn" data-action="cloud-sync">Sincronizar tudo com a nuvem</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div></div>`;
   }
-  const upgradeForm = `<div class="form-grid"><div class="field" style="grid-column:1/-1"><label>Nome para criar conta</label><input class="input" id="cloudName" value="${esc(p.name||'')}"></div><div class="field"><label>E-mail</label><input class="input" id="cloudEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div><div class="field"><label>Senha</label><input class="input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="Maiúscula, número e especial"></div><div class="field"><label>Confirmar senha</label><input class="input" id="cloudPassword2" type="password" autocomplete="new-password" placeholder="repita a senha"></div><label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="cloudAcceptTerms"> <span>Li e aceito os Termos e a Política de Privacidade.</span></label></div><div class="actions"><button class="btn" data-action="cloud-login">Entrar</button><button class="btn secondary" data-action="cloud-signup">Criar conta</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div>`;
+  const upgradeForm = `<div class="form-grid"><div class="field" style="grid-column:1/-1"><label>Nome para criar conta</label><input class="input" id="cloudName" value="${esc(p?.name||'')}"></div><div class="field"><label>E-mail</label><input class="input" id="cloudEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div><div class="field"><label>Senha</label><input class="input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="Maiúscula, número e especial"></div><div class="field"><label>Confirmar senha</label><input class="input" id="cloudPassword2" type="password" autocomplete="new-password" placeholder="repita a senha"></div><label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="cloudAcceptTerms"> <span>Li e aceito os Termos e a Política de Privacidade.</span></label></div><div class="actions"><button class="btn" data-action="cloud-login">Entrar</button><button class="btn secondary" data-action="cloud-signup">Criar conta</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div>`;
   if(isLocalMode()){
-    return `<div class="cloud-panel"><p><b>Modo local ativo.</b></p><p class="muted">Seus treinos ficam neste aparelho. Para salvar histórico, plano e rotina alimentar na nuvem, crie uma conta e confirme o e-mail antes de limpar o app.</p><div class="actions"><button class="btn secondary" data-action="cloud-refresh">Atualizar IA/local</button><button class="btn secondary danger-soft" data-action="local-logout">Limpar app local</button></div></div><div class="alert orange"><div>⚠️</div><div><strong>Antes de sair do modo local</strong><p>Crie uma conta primeiro para sincronizar seus dados. Depois de entrar na conta, clique em “Sair e limpar app”.</p></div></div><div class="divider"></div>${upgradeForm}`;
+    return `<div class="cloud-panel"><p><b>Modo local ativo.</b></p><p class="muted">Seus treinos ficam neste aparelho. Para salvar na nuvem, crie uma conta e confirme o e-mail antes de limpar o app.</p><div class="actions"><button class="btn secondary" data-action="cloud-refresh">Atualizar IA/local</button></div></div><div class="alert orange"><div>⚠️</div><div><strong>Antes de limpar</strong><p>Crie uma conta primeiro para sincronizar seus dados. A limpeza local fica na Zona de segurança, no final desta tela.</p></div></div><div class="divider"></div>${upgradeForm}`;
   }
-  return `${upgradeForm}<p class="muted">Ao criar conta, talvez o Supabase peça confirmação por e-mail. O app sem login continua funcionando normalmente. Se estiver offline, o login e a nuvem ficam indisponíveis.</p>`;
+  return `${upgradeForm}<p class="muted">Ao criar conta, talvez o Supabase peça confirmação por e-mail. O app sem login continua funcionando normalmente.</p>`;
 }
 function inputHTML(id,label,val,type='text'){ return `<div class="field"><label>${label}</label><input class="input" type="${type}" data-profile-field="${id}" value="${esc(val)}"></div>`; }
 function selectHTML(id,label,val,options,labelFn=(v)=>v){ return `<div class="field"><label>${label}</label><select class="select" data-profile-field="${id}">${options.map(o=>`<option value="${esc(o)}" ${String(val||'')===String(o)?'selected':''}>${esc(labelFn(o))}</option>`).join('')}</select></div>`; }
@@ -1338,6 +1386,7 @@ function handleAction(a){
   if(a==='finish-cycle-ai') finishCycleAndGeneratePlan();
   if(a==='generate-diet-plan') generateDietPlan();
   if(a==='open-levels') openLevelModal();
+  if(a==='account-switch') openProfileSwitcher();
   if(a==='sync-xp-cloud') syncXpEventsToCloud({silent:false}).then(()=>render());
   if(a==='load-xp-cloud') loadXpFromCloud({silent:false}).then(r=>{ render(); toast(r?.ok?'XP carregado da nuvem.':'Não consegui carregar XP da nuvem.'); });
 }
@@ -1359,7 +1408,7 @@ function saveProfileForm(){
     else p.ai[k]=f.value.trim();
   });
   save();
-  if(hasCloudAccount()) upsertCloudProfile(p.name || 'Usuário').catch(()=>{});
+  if(hasCloudAccount()) upsertCloudProfile(null).catch(()=>{});
   toast('Perfil salvo.'); render();
 }
 async function createProfileFlow(){
@@ -1522,10 +1571,18 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
 function openProfileSwitcher(){
   const layer=byId('modalLayer');
   const list=(state.profiles||[]).map(p=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((p.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(p.name || 'Perfil')}</strong><div class="small">${p.accountEmail?esc(p.accountEmail)+' • ':''}${levelFromXp(ensureGamification(p).xp).rank.name} • Nv. ${levelFromXp(ensureGamification(p).xp).roman}</div></div></div><button class="btn sm ${p.id===state.activeProfileId?'green':'secondary'}" data-modal-switch-profile="${p.id}">${p.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('');
-  layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Perfil</p><h2>Quem está treinando?</h2><p class="muted">Cada conta fica separada neste aparelho.</p></div><button class="close" data-close>×</button></div><div class="profile-list">${list || '<div class="empty">Nenhum perfil ativo neste aparelho.</div>'}</div><div class="actions"><button class="btn" data-modal-new-profile>Adicionar novo perfil</button></div></div>`;
+  layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Alternar conta</p><h2>Escolha o usuário</h2><p class="muted">Cada conta tem treino, nutri, XP e progresso separados neste aparelho.</p></div><button class="close" data-close>×</button></div><div class="profile-list">${list || '<div class="empty">Nenhum perfil ativo neste aparelho.</div>'}</div><div class="actions"><button class="btn" data-modal-new-profile>Adicionar novo perfil</button></div></div>`;
   layer.classList.remove('hidden');
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
-  document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=()=>{state.activeProfileId=b.dataset.modalSwitchProfile; state.onboardingDone=true; state.entryMode=state.entryMode||'account'; save(); closeModal(); render();});
+  document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=async()=>{
+    state.activeProfileId=b.dataset.modalSwitchProfile;
+    state.onboardingDone=true;
+    screen='home';
+    save();
+    closeModal();
+    render();
+    toast('Conta alternada.');
+  });
   document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();};
 }
 
@@ -1687,7 +1744,7 @@ async function syncCurrentDataBeforeLogout(){
   const p=profile();
   const result={profile:false, workouts:false, plan:false, diet:false};
   if(!hasCloudAccount()) return result;
-  try{ await upsertCloudProfile(p.name || 'Usuário'); result.profile=true; }catch(e){ console.warn('Falha ao sincronizar perfil antes do logout:', e); }
+  try{ await upsertCloudProfile(null); result.profile=true; }catch(e){ console.warn('Falha ao sincronizar perfil antes do logout:', e); }
   try{ await syncLocalHistoryToCloud({silent:true}); result.workouts=true; }catch(e){ console.warn('Falha ao sincronizar histórico antes do logout:', e); }
   try{ await saveCurrentPlanToCloud('logout_sync'); result.plan=true; }catch(e){ console.warn('Falha ao sincronizar plano antes do logout:', e); }
   try{ await saveDietPlanToCloud(p.dietPlan, {silent:true}); result.diet=true; }catch(e){ console.warn('Falha ao sincronizar nutri antes do logout:', e); }
@@ -1727,25 +1784,42 @@ async function cloudLogout(){
   toast('Você saiu. Cache local limpo.');
   render();
 }
-async function upsertCloudProfile(name, sourceInfo=null){
+async function upsertCloudProfile(name=null, sourceInfo=null){
   const user=await getCurrentCloudUser();
-  if(!user) return;
+  if(!user || isAnonymousCloudUser()) return;
   const p=profile();
+  if(!p || (p.cloudUserId && p.cloudUserId !== user.id)) return;
   const info = sourceInfo || {};
+
+  let existing=null;
+  try{
+    const { data } = await supabaseClient.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    existing=data || null;
+  }catch(e){}
+
+  const textOrExisting=(candidate, existingValue, fallback=null)=>{
+    const v=String(candidate ?? '').trim();
+    return v ? v : (existingValue ?? fallback);
+  };
+  const numOrExisting=(candidate, existingValue, fallback=null)=>{
+    const n=parseNumberValue(candidate);
+    return Number.isFinite(n) && n !== null ? n : (existingValue ?? fallback);
+  };
+
   const row = {
     id:user.id,
-    name:name || p.name || info.name || user.user_metadata?.display_name || 'Usuário',
-    sex:p.sex || info.sex || user.user_metadata?.sex || null,
-    age:parseNumberValue(p.age || info.age || user.user_metadata?.age),
-    height:parseNumberValue(p.height || info.height || user.user_metadata?.height),
-    initial_weight:parseNumberValue(p.weight || info.weight || user.user_metadata?.weight || user.user_metadata?.initial_weight),
-    goal:p.goal || info.goal || user.user_metadata?.goal || null,
-    focus:p.focus || info.focus || user.user_metadata?.focus || null,
-    notes:p.notes || info.notes || user.user_metadata?.notes || null,
-    experience:p.experience || info.experience || user.user_metadata?.experience || 'Iniciante',
-    days_per_week:parseNumberValue(p.daysPerWeek || info.daysPerWeek || user.user_metadata?.daysPerWeek || user.user_metadata?.days_per_week || 5),
-    accepted_terms_at:p.acceptedTermsAt || user.user_metadata?.accepted_terms_at || nowISO(),
-    accepted_privacy_at:p.acceptedPrivacyAt || user.user_metadata?.accepted_privacy_at || nowISO()
+    name:textOrExisting(name || p.name || info.name || user.user_metadata?.display_name, existing?.name, user.email?.split('@')[0] || 'Usuário'),
+    sex:textOrExisting(p.sex || info.sex || user.user_metadata?.sex, existing?.sex, null),
+    age:numOrExisting(p.age || info.age || user.user_metadata?.age, existing?.age, null),
+    height:numOrExisting(p.height || info.height || user.user_metadata?.height, existing?.height, null),
+    initial_weight:numOrExisting(p.weight || info.weight || user.user_metadata?.weight || user.user_metadata?.initial_weight, existing?.initial_weight, null),
+    goal:textOrExisting(p.goal || info.goal || user.user_metadata?.goal, existing?.goal, null),
+    focus:textOrExisting(p.focus || info.focus || user.user_metadata?.focus, existing?.focus, null),
+    notes:textOrExisting(p.notes || info.notes || user.user_metadata?.notes, existing?.notes, null),
+    experience:textOrExisting(p.experience || info.experience || user.user_metadata?.experience, existing?.experience, 'Iniciante'),
+    days_per_week:numOrExisting(p.daysPerWeek || info.daysPerWeek || user.user_metadata?.daysPerWeek || user.user_metadata?.days_per_week, existing?.days_per_week, 5),
+    accepted_terms_at:p.acceptedTermsAt || existing?.accepted_terms_at || user.user_metadata?.accepted_terms_at || nowISO(),
+    accepted_privacy_at:p.acceptedPrivacyAt || existing?.accepted_privacy_at || user.user_metadata?.accepted_privacy_at || nowISO()
   };
   const { error } = await supabaseClient.from('profiles').upsert(row, { onConflict:'id' });
   if(error) throw error;
@@ -2080,7 +2154,7 @@ async function generateSpecificPlanFlow(){
   p.focus = info.focus || p.focus;
   p.notes = info.notes || p.notes;
   save();
-  if(hasCloudAccount()) upsertCloudProfile(p.name || 'Usuário').catch(()=>{});
+  if(hasCloudAccount()) upsertCloudProfile(null).catch(()=>{});
   await generateInitialPlanFromAI({silent:false, force:true, fallbackDefault:true});
 }
 
