@@ -36,6 +36,115 @@ const DEFAULT_WORKOUTS = [
 ];
 function ex(id,name,type){return {id,name,type,target:'4x12'};}
 
+const WORKOUT_LETTERS = ['A','B','C','D','E','F'];
+function clampTrainingDays(value){
+  const n = parseInt(value, 10);
+  if(!Number.isFinite(n)) return 5;
+  return Math.max(2, Math.min(6, n));
+}
+function normalizeExperienceLabel(value){
+  const v = String(value || '').toLowerCase();
+  if(v.includes('avanç') || v.includes('avanc')) return 'Avançado';
+  if(v.includes('inter')) return 'Intermediário';
+  return 'Iniciante';
+}
+function targetForExperience(exp, kind='default'){
+  const level = normalizeExperienceLabel(exp);
+  if(kind === 'cardio') return level === 'Iniciante' ? '10-20 min leve' : level === 'Intermediário' ? '15-25 min moderado' : '20-30 min moderado';
+  if(kind === 'core') return level === 'Iniciante' ? '2-3x10-15' : level === 'Intermediário' ? '3x12-20' : '3-4x12-20';
+  if(level === 'Iniciante') return '2-3x10-12';
+  if(level === 'Intermediário') return '3-4x8-12';
+  return '4x6-12';
+}
+function makeWorkout(id, name, focus, items, exp){
+  return { id, name, focus, exercises: items.map((item, idx)=>{
+    const arr = Array.isArray(item) ? item : [item, 'máquina'];
+    const [name, type='máquina', kind='default'] = arr;
+    return { id: `${id.toLowerCase()}_tpl_${idx+1}`, name, type, target: targetForExperience(exp, kind) };
+  })};
+}
+function templateForProfile(sourceProfile=null){
+  const p = sourceProfile || profile();
+  const days = clampTrainingDays(p?.daysPerWeek || 5);
+  const exp = normalizeExperienceLabel(p?.experience || 'Iniciante');
+  const beginner = exp === 'Iniciante';
+  const intermediate = exp === 'Intermediário';
+  const cardio = ['Cardio leve/moderado','cardio','cardio'];
+  const core = ['Abdominal máquina ou prancha','core','core'];
+  let workouts = [];
+
+  if(days === 2){
+    workouts = [
+      makeWorkout('A','Full body A','Corpo inteiro', beginner ? [
+        ['Leg press 45°','máquina'], ['Supino máquina ou halter','máquina/halter'], ['Pulley frente','máquina'], ['Cadeira extensora','máquina'], ['Rosca direta no cabo','cabo'], ['Tríceps corda','cabo'], core
+      ] : [
+        ['Agachamento hack ou leg press','máquina'], ['Supino reto','halter/máquina'], ['Remada baixa','máquina'], ['Stiff com halter','halter'], ['Elevação lateral','halter'], ['Rosca direta','barra/cabo'], core
+      ], exp),
+      makeWorkout('B','Full body B','Corpo inteiro', beginner ? [
+        ['Cadeira flexora','máquina'], ['Supino inclinado máquina ou halter','máquina/halter'], ['Remada baixa','máquina'], ['Cadeira abdutora','máquina'], ['Desenvolvimento máquina','máquina'], ['Panturrilha sentado','máquina'], cardio
+      ] : [
+        ['Stiff ou mesa flexora','halter/máquina'], ['Supino inclinado','halter/máquina'], ['Pulley pegada neutra','máquina'], ['Cadeira extensora','máquina'], ['Desenvolvimento','halter/máquina'], ['Tríceps no crossover','cabo'], cardio
+      ], exp)
+    ];
+  } else if(days === 3){
+    workouts = beginner ? [
+      makeWorkout('A','Full body A','Base e técnica', [['Leg press 45°','máquina'], ['Supino máquina','máquina'], ['Pulley frente','máquina'], ['Cadeira extensora','máquina'], ['Rosca direta cabo','cabo'], core], exp),
+      makeWorkout('B','Full body B','Posterior e costas', [['Mesa flexora','máquina'], ['Remada baixa','máquina'], ['Supino inclinado halter','halter'], ['Cadeira abdutora','máquina'], ['Tríceps corda','cabo'], cardio], exp),
+      makeWorkout('C','Full body C','Reforço geral', [['Agachamento hack','máquina'], ['Pulley neutro','máquina'], ['Peck fly','máquina'], ['Panturrilha sentado','máquina'], ['Elevação lateral','halter'], core], exp)
+    ] : [
+      makeWorkout('A','Push','Peito, ombro e tríceps', [['Supino inclinado','halter/máquina'], ['Supino reto','halter/máquina'], ['Peck fly','máquina'], ['Desenvolvimento','halter/máquina'], ['Elevação lateral','halter'], ['Tríceps corda','cabo']], exp),
+      makeWorkout('B','Pull','Costas e bíceps', [['Pulley frente','máquina'], ['Remada baixa','máquina'], ['Remada unilateral','halter/máquina'], ['Peck fly inverso','máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter']], exp),
+      makeWorkout('C','Legs','Pernas e core', [['Leg press 45°','máquina'], ['Agachamento hack','máquina'], ['Cadeira extensora','máquina'], ['Mesa flexora','máquina'], ['Panturrilha','máquina'], core, cardio], exp)
+    ];
+  } else if(days === 4){
+    workouts = [
+      makeWorkout('A','Upper A','Parte superior', [['Supino inclinado','halter/máquina'], ['Supino reto','halter/máquina'], ['Pulley frente','máquina'], ['Remada baixa','máquina'], ['Elevação lateral','halter'], ['Tríceps corda','cabo'], ['Rosca direta','barra/cabo']], exp),
+      makeWorkout('B','Lower A','Quadríceps e panturrilha', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Cadeira flexora','máquina'], ['Panturrilha sentado','máquina'], core], exp),
+      makeWorkout('C','Upper B','Costas, ombro e braços', [['Pulley neutro/supinado','máquina'], ['Remada unilateral','halter/máquina'], ['Peck fly','máquina'], ['Peck fly inverso','máquina'], ['Desenvolvimento','halter/máquina'], ['Rosca martelo','halter'], ['Tríceps máquina/cabo','máquina/cabo']], exp),
+      makeWorkout('D','Lower B','Posterior e glúteo', [['Stiff','halter/barra'], ['Mesa flexora','máquina'], ['Leg press unilateral ou bilateral','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], core, cardio], exp)
+    ];
+  } else if(days === 5){
+    workouts = [
+      makeWorkout('A','Peito + Bíceps','Parte superior', [['Supino inclinado com halter','halter'], ['Supino deitado/reto','halter/máquina'], ['Peck fly','máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter'], ['Rosca Scott/máquina ou cabo','máquina/cabo'], core, cardio], exp),
+      makeWorkout('B','Perna - Quadríceps','Perna', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Cadeira flexora','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha sentado','máquina']], exp),
+      makeWorkout('C','Costas + Tríceps','Parte superior', [['Pulley frente pegada aberta','máquina'], ['Pulley frente pegada supinada/neutra','máquina'], ['Remada baixa com triângulo','máquina'], ['Remada unilateral ou com apoio no peito','halter/máquina'], ['Peck fly inverso','máquina'], ['Tríceps barra no crossover','cabo'], ['Tríceps máquina/corda/francês','máquina/cabo'], core, cardio], exp),
+      makeWorkout('D','Ombro + Braços extra','Ombro e braços', [['Desenvolvimento com halter ou máquina','halter/máquina'], ['Elevação lateral com halter','halter'], ['Elevação lateral na polia ou máquina','máquina/cabo'], ['Face pull ou peck fly inverso','máquina/cabo'], ['Rosca extra Scott/cabo','máquina/cabo'], ['Tríceps extra corda/francês','máquina/cabo'], core], exp),
+      makeWorkout('E','Posterior/Perna','Posterior', [['Stiff com halter ou barra','halter/barra'], ['Mesa flexora','máquina'], ['Flexora em pé unilateral','máquina'], ['Leg press unilateral ou bilateral','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], core], exp)
+    ];
+  } else {
+    workouts = [
+      makeWorkout('A','Push A','Peito, ombro e tríceps', [['Supino inclinado','halter/máquina'], ['Supino reto','halter/máquina'], ['Peck fly','máquina'], ['Desenvolvimento','halter/máquina'], ['Elevação lateral','halter'], ['Tríceps corda','cabo']], exp),
+      makeWorkout('B','Pull A','Costas e bíceps', [['Pulley frente','máquina'], ['Remada baixa','máquina'], ['Remada unilateral','halter/máquina'], ['Peck fly inverso','máquina'], ['Rosca direta','barra/cabo'], ['Rosca martelo','halter']], exp),
+      makeWorkout('C','Legs A','Quadríceps', [['Agachamento hack','máquina'], ['Leg press 45°','máquina'], ['Cadeira extensora','máquina'], ['Cadeira flexora','máquina'], ['Panturrilha sentado','máquina'], core], exp),
+      makeWorkout('D','Push B','Peito/ombro/tríceps variação', [['Supino máquina ou halter','máquina/halter'], ['Crucifixo ou peck fly','máquina/halter'], ['Desenvolvimento máquina','máquina'], ['Elevação lateral polia/máquina','máquina/cabo'], ['Tríceps barra','cabo'], ['Tríceps francês/corda','cabo']], exp),
+      makeWorkout('E','Pull B','Costas/bíceps variação', [['Pulley neutro/supinado','máquina'], ['Remada com apoio no peito','máquina'], ['Pulldown ou remada alta','máquina/cabo'], ['Face pull','cabo'], ['Rosca Scott','máquina/cabo'], ['Rosca alternada','halter']], exp),
+      makeWorkout('F','Legs B','Posterior e glúteo', [['Stiff','halter/barra'], ['Mesa flexora','máquina'], ['Flexora em pé unilateral','máquina'], ['Leg press unilateral','máquina'], ['Cadeira abdutora','máquina'], ['Panturrilha','máquina'], cardio], exp)
+    ];
+  }
+
+  const title = `${days} dias • ${exp}`;
+  return { title, workouts };
+}
+function applyDefaultPlanForProfile(p, force=false){
+  if(!p) return;
+  if(!force && p.planMeta?.source === 'ai') return;
+  if(!force && Array.isArray(p.history) && p.history.length) return;
+  const plan = templateForProfile(p);
+  p.workouts = structuredClone(plan.workouts);
+  p.queue = p.workouts.map(w=>w.id);
+  p.tempDone = {};
+  p.tempStatus = {};
+  p.planMeta = {source:'default', cycle:p.planMeta?.cycle || 1, title:`Treino padrão • ${plan.title}`, updatedAt:nowISO()};
+}
+function workoutsPerCycle(p=profile()){
+  const count = Array.isArray(p?.workouts) && p.workouts.length ? p.workouts.length : clampTrainingDays(p?.daysPerWeek || 5);
+  return Math.max(1, count);
+}
+function currentCycleNumber(p=profile()){
+  return Math.floor((p.progress||0) / workoutsPerCycle(p));
+}
+
+
 let state = migrateState(load());
 let screen = 'home';
 let activeModalWorkout = null;
@@ -46,11 +155,13 @@ function defaultState(){
   return { activeProfileId: initialProfile.id, profiles: [initialProfile], version: 3, onboardingDone: false, entryMode: null };
 }
 function newProfile(name='Novo perfil'){
-  return {
-    id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, age:'', height:'', weight:'', goal:'', focus:'', notes:'', experience:'', daysPerWeek:'',
-    queue: ['A','B','C','D','E'], progress: 0, target: 100, workouts: structuredClone(DEFAULT_WORKOUTS), planMeta:{source:'default', cycle:1, title:'Treino padrão'},
+  const p = {
+    id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, age:'', height:'', weight:'', goal:'', focus:'', notes:'', experience:'Iniciante', daysPerWeek:'5',
+    queue: [], progress: 0, target: 100, workouts: [], planMeta:{source:'default', cycle:1, title:'Treino padrão'},
     weights:{}, exerciseMeta:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], ai:{autoWorkoutReport:true}, createdAt: nowISO()
   };
+  applyDefaultPlanForProfile(p, true);
+  return p;
 }
 function load(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultState(); } catch { return defaultState(); } }
 function hasMeaningfulProfileData(p){
@@ -236,8 +347,8 @@ function onboardingProfileFields(prefix){
     <div class="field"><label>Peso inicial</label><input class="input" id="${prefix}Weight" inputmode="decimal" placeholder="ex: 83,2"></div>
     <div class="field"><label>Objetivo</label><input class="input" id="${prefix}Goal" placeholder="ex: ganhar massa e secar"></div>
     <div class="field"><label>Foco principal</label><input class="input" id="${prefix}Focus" placeholder="ex: peito, braços, recomposição"></div>
-    <div class="field"><label>Experiência</label><select class="select" id="${prefix}Experience"><option value="">Selecione</option><option>Iniciante</option><option>Intermediário</option><option>Avançado</option></select></div>
-    <div class="field"><label>Dias por semana</label><select class="select" id="${prefix}Days"><option value="5">5 dias</option><option value="3">3 dias</option><option value="4">4 dias</option><option value="6">6 dias</option></select></div>
+    <div class="field"><label>Nível</label><select class="select" id="${prefix}Experience"><option value="">Selecione</option><option>Iniciante</option><option>Intermediário</option><option>Avançado</option></select></div>
+    <div class="field"><label>Dias por semana</label><select class="select" id="${prefix}Days"><option value="2">2 dias</option><option value="3">3 dias</option><option value="4">4 dias</option><option value="5" selected>5 dias</option><option value="6">6 dias</option></select></div>
     <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea id="${prefix}Notes" placeholder="Dor, limitação, tempo de treino, equipamento, preferências..."></textarea></div>
   </div>`;
 }
@@ -284,22 +395,31 @@ function validateProfileInfo(info){
   if(!info.goal || info.goal.length < 3) return 'Informe seu objetivo.';
   if(!info.focus || info.focus.length < 2) return 'Informe seu foco principal.';
   if(!info.experience) return 'Informe sua experiência.';
-  if(!info.daysPerWeek) return 'Informe quantos dias por semana pretende treinar.';
+  if(!info.daysPerWeek || clampTrainingDays(info.daysPerWeek) != Number(info.daysPerWeek)) return 'Escolha entre 2 e 6 dias por semana.';
   return '';
 }
-function applyProfileInfo(info){
-  const p=profile();
+function applyProfileInfo(info, targetProfile=null){
+  const p=targetProfile || profile();
   p.name=info.name;
   p.age=info.age;
   p.height=info.height;
   p.weight=info.weight;
   p.goal=info.goal;
   p.focus=info.focus;
-  p.experience=info.experience;
-  p.daysPerWeek=info.daysPerWeek;
+  p.experience=normalizeExperienceLabel(info.experience);
+  p.daysPerWeek=String(clampTrainingDays(info.daysPerWeek));
   p.notes=info.notes;
   ensureProfile(p);
+  applyDefaultPlanForProfile(p, true);
   save();
+  return p;
+}
+function createFreshLocalProfile(info){
+  const p = newProfile(info?.name || 'Perfil local');
+  state.profiles.push(p);
+  state.activeProfileId = p.id;
+  applyProfileInfo(info, p);
+  return p;
 }
 async function onboardingLogin(){
   if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
@@ -343,22 +463,30 @@ async function onboardingLocal(){
   const info=readOnboardingProfile('local');
   const msg=validateProfileInfo(info);
   if(msg) return showFormError('localError', msg);
-  applyProfileInfo(info);
+
+  // Modo local deve sempre começar como um perfil novo, sem reaproveitar
+  // nome, histórico, fila ou sessão anônima anterior.
+  createFreshLocalProfile(info);
   state.onboardingDone=true;
   state.entryMode='local';
   save();
+
   if(supabaseClient && !isOffline()){
     try{
-      const { data, error } = await supabaseClient.auth.signInAnonymously({options:{data:{display_name:info.name, entry_mode:'local'}}});
+      // Garante uma sessão anônima nova para este perfil local.
+      // Sem isso, o Supabase pode reaproveitar o anônimo anterior.
+      await supabaseClient.auth.signOut().catch(()=>{});
+      cloudUser=null;
+      const { data, error } = await supabaseClient.auth.signInAnonymously({options:{data:{display_name:info.name, entry_mode:'local', local_profile_id: state.activeProfileId}}});
       if(error) throw error;
       cloudUser=data?.user || null;
       await generateInitialPlanFromAI({silent:false});
-      toast('Modo local ativado com IA e treino de adaptação.');
+      toast('Novo perfil local criado com IA e treino de adaptação.');
     }catch(e){
-      toast('Modo local ativado. IA online precisa de login anônimo habilitado no Supabase.');
+      toast('Novo perfil local criado. IA online precisa de login anônimo habilitado no Supabase.');
     }
   }else{
-    toast('Modo local ativado. IA fica pausada enquanto estiver offline.');
+    toast('Novo perfil local criado. IA fica pausada enquanto estiver offline.');
   }
   screen='home';
   render();
@@ -366,7 +494,7 @@ async function onboardingLocal(){
 
 function renderHome(){
   const p = profile(); const w=currentWorkout(p); const pct=Math.min(100, Math.round(p.progress/p.target*100));
-  const cycles = Math.floor(p.progress/5);
+  const cycles = currentCycleNumber(p);
   return `
     <section class="hero">
       <div class="hero-row">
@@ -406,7 +534,7 @@ function workoutQueueCard(p,id,current=false){ const w=workoutById(p,id); return
 function renderWorkouts(){ const p=profile(); return `<section class="card"><div class="card-title"><div><h3>Treinos A–E</h3><p>Você pode abrir todos, mas só conclui o treino da ordem.</p></div><button class="btn sm secondary" data-action="edit-current-workout">Editar atual</button></div><div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div></section><section class="card pro-tip"><div><span class="badge orange">PRO</span><h3>Editor liberado</h3><p>Agora você pode editar exercícios, ordem, nome, tipo e meta de reps direto no app.</p></div></section>`; }
 
 function renderProgress(){
-  const p=profile(); const gains = exerciseGains(p); const cycles=Math.floor(p.progress/5);
+  const p=profile(); const gains = exerciseGains(p); const cycles=currentCycleNumber(p);
   return `<section class="hero"><div class="hero-row"><div><p class="eyebrow">Evolução</p><h2>${p.progress}/${p.target} treinos</h2><p>${cycles} ciclos completos. Acompanhe cargas, consistência e estagnações.</p></div><div class="progress-ring" style="--p:${Math.round(p.progress/p.target*100)}%"><div class="progress-ring-inner">${p.progress}<small>treinos</small></div></div></div></section>
   <section class="grid two"><div class="stat"><strong>${gains.filter(g=>g.delta>0).length}</strong><span>exercícios com evolução</span></div><div class="stat"><strong>${stagnated(p).length}</strong><span>possíveis estagnados</span></div></section>
   <section class="card"><div class="card-title"><h3>Top evolução de carga</h3><p>Comparando primeiro e último registro</p></div>${gains.length?gains.slice(0,8).map(g=>`<div class="history-row"><div><strong>${esc(g.name)}</strong><span>${g.first} → ${g.last}</span></div><span class="badge green">+${g.delta}</span></div>`).join(''):'<div class="empty">Ainda não há histórico suficiente.</div>'}</section>
@@ -440,7 +568,7 @@ function renderCoach(){
   <section class="card"><div class="card-title"><h3>Últimos relatórios da IA</h3><p>Gerados ao finalizar treino</p></div>${reports.length?reports.map(h=>aiHistoryHTML(h)).join(''):'<div class="empty">Nenhum relatório de IA salvo ainda.</div>'}</section>`;
 }
 function generateInsights(p){
-  const out=[]; const cycles=Math.floor(p.progress/5); const st=stagnated(p);
+  const out=[]; const cycles=currentCycleNumber(p); const st=stagnated(p);
   out.push({icon:'🔥',title:`${p.progress}/${p.target} treinos concluídos`,text:`Você completou ${cycles} ciclos. Próxima meta: ${Math.min(p.target, (cycles+1)*5)} treinos.`,type:'orange'});
   if(st.length) out.push({icon:'⚠️',title:'Possível estagnação de carga',text:`Há ${st.length} exercício(s) com mesma carga nos últimos registros. Se a execução estiver boa, planeje subir pouco ou melhorar reps.`,type:'orange'});
   const skipped = p.history.slice(-5).reduce((a,h)=>a+(h.skippedCount||0),0); if(skipped) out.push({icon:'🟡',title:'Exercícios pulados recentemente',text:`Nos últimos 5 treinos, você pulou ${skipped} exercício(s). Veja se isso está atrapalhando ombro/costas.`,type:'orange'});
@@ -464,7 +592,7 @@ function historyRowHTML(h){
 
 
 function renderProfile(){ const p=profile(); const ai=p.ai||{}; return `<section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais. Se entrar na conta, salva também na nuvem.</p></div><div class="form-grid">
-  ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}${inputHTML('experience','Experiência',p.experience)}${inputHTML('daysPerWeek','Dias por semana',p.daysPerWeek)}
+  ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}${selectHTML('experience','Nível',p.experience,['Iniciante','Intermediário','Avançado'])}${selectHTML('daysPerWeek','Dias por semana',p.daysPerWeek,['2','3','4','5','6'], v=>v+' dias')}
   <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div></div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button><button class="btn secondary" data-action="new-profile">Novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
   <section class="card"><div class="card-title"><div><h3>Conta e sincronização</h3><p>Sem login o app continua funcionando só neste aparelho. Com login, salva também no Supabase.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}</section>
   <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Backend configurado no app. Para gerar relatório, o usuário precisa estar logado e online.</p></div><span class="badge green">Pronta</span></div><div class="form-grid">
@@ -485,6 +613,7 @@ function renderCloudAccount(p){
   return `${upgradeForm}<p class="muted">Ao criar conta, talvez o Supabase peça confirmação por e-mail. O app sem login continua funcionando normalmente. Se estiver offline, o login e a nuvem ficam indisponíveis.</p>`;
 }
 function inputHTML(id,label,val,type='text'){ return `<div class="field"><label>${label}</label><input class="input" type="${type}" data-profile-field="${id}" value="${esc(val)}"></div>`; }
+function selectHTML(id,label,val,options,labelFn=(v)=>v){ return `<div class="field"><label>${label}</label><select class="select" data-profile-field="${id}">${options.map(o=>`<option value="${esc(o)}" ${String(val||'')===String(o)?'selected':''}>${esc(labelFn(o))}</option>`).join('')}</select></div>`; }
 
 function bindScreen(){
   document.querySelectorAll('[data-screen-go]').forEach(el=>el.onclick=()=>setScreen(el.dataset.screenGo));
@@ -515,7 +644,14 @@ function handleAction(a){
 
 function saveProfileForm(){
   const p=profile();
+  const beforeDays = String(p.daysPerWeek||'');
+  const beforeExp = String(p.experience||'');
   document.querySelectorAll('[data-profile-field]').forEach(f=>p[f.dataset.profileField]=f.value);
+  p.experience = normalizeExperienceLabel(p.experience);
+  p.daysPerWeek = String(clampTrainingDays(p.daysPerWeek));
+  if(p.planMeta?.source !== 'ai' && !(p.history&&p.history.length) && (beforeDays !== p.daysPerWeek || beforeExp !== p.experience)){
+    applyDefaultPlanForProfile(p, true);
+  }
   document.querySelectorAll('[data-ai-field]').forEach(f=>{
     const k=f.dataset.aiField;
     if(k==='autoWorkoutReport') p.ai[k]=f.checked;
@@ -634,7 +770,7 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
 
 function openProfileSwitcher(){ const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Perfil</p><h2>Quem está treinando?</h2></div><button class="close" data-close>×</button></div><div class="profile-list">${state.profiles.map(p=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((p.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(p.name || 'Perfil')}</strong><div class="small">${p.progress}/${p.target} treinos</div></div></div><button class="btn sm ${p.id===state.activeProfileId?'green':'secondary'}" data-modal-switch-profile="${p.id}">${p.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div><div class="actions"><button class="btn" data-modal-new-profile>Novo perfil</button></div></div>`; layer.classList.remove('hidden'); document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=()=>{state.activeProfileId=b.dataset.modalSwitchProfile; save(); closeModal();}); document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();}; }
 
-function openCheckinModal(){ const p=profile(), cycle=Math.floor(p.progress/5); const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Check-in</p><h2>Ciclo ${cycle}</h2><p class="muted">Tente usar sempre a mesma luz, pose e distância.</p></div><button class="close" data-close>×</button></div><div class="form-grid">${inputPlain('checkWeight','Peso do dia')} ${inputPlain('checkWaist','Cintura')}<div class="field" style="grid-column:1/-1"><label>Observação do ciclo</label><textarea id="checkNotes"></textarea></div></div><div class="photo-grid"><label class="photo-box"><span>Frente<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="front" hidden></label><label class="photo-box"><span>Lado<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="side" hidden></label><label class="photo-box"><span>Costas<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="back" hidden></label></div><div class="actions"><button class="btn" data-save-checkin>Salvar check-in</button><button class="btn secondary" data-close>Cancelar</button></div></div>`; layer.classList.remove('hidden'); const photos={}; document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-photo]').forEach(inp=>inp.onchange=async()=>{ const img=await compressImage(inp.files[0]); photos[inp.dataset.photo]=img; inp.parentElement.innerHTML=`<img src="${img}" alt="foto ${inp.dataset.photo}">`; }); document.querySelector('[data-save-checkin]').onclick=()=>{ p.checkins.push({id:'c_'+Date.now(), date:nowISO(), cycle, weight:byId('checkWeight').value, waist:byId('checkWaist').value, notes:byId('checkNotes').value, photos}); save(); closeModal(); toast('Check-in salvo.'); }; }
+function openCheckinModal(){ const p=profile(), cycle=currentCycleNumber(p); const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Check-in</p><h2>Ciclo ${cycle}</h2><p class="muted">Tente usar sempre a mesma luz, pose e distância.</p></div><button class="close" data-close>×</button></div><div class="form-grid">${inputPlain('checkWeight','Peso do dia')} ${inputPlain('checkWaist','Cintura')}<div class="field" style="grid-column:1/-1"><label>Observação do ciclo</label><textarea id="checkNotes"></textarea></div></div><div class="photo-grid"><label class="photo-box"><span>Frente<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="front" hidden></label><label class="photo-box"><span>Lado<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="side" hidden></label><label class="photo-box"><span>Costas<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="back" hidden></label></div><div class="actions"><button class="btn" data-save-checkin>Salvar check-in</button><button class="btn secondary" data-close>Cancelar</button></div></div>`; layer.classList.remove('hidden'); const photos={}; document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-photo]').forEach(inp=>inp.onchange=async()=>{ const img=await compressImage(inp.files[0]); photos[inp.dataset.photo]=img; inp.parentElement.innerHTML=`<img src="${img}" alt="foto ${inp.dataset.photo}">`; }); document.querySelector('[data-save-checkin]').onclick=()=>{ p.checkins.push({id:'c_'+Date.now(), date:nowISO(), cycle, weight:byId('checkWeight').value, waist:byId('checkWaist').value, notes:byId('checkNotes').value, photos}); save(); closeModal(); toast('Check-in salvo.'); }; }
 function inputPlain(id,label){ return `<div class="field"><label>${label}</label><input class="input" id="${id}"></div>`; }
 function compressImage(file){ return new Promise((resolve,reject)=>{ if(!file) return resolve(''); const r=new FileReader(); r.onload=()=>{ const img=new Image(); img.onload=()=>{ const max=900, scale=Math.min(1,max/img.width); const c=document.createElement('canvas'); c.width=Math.round(img.width*scale); c.height=Math.round(img.height*scale); c.getContext('2d').drawImage(img,0,0,c.width,c.height); resolve(c.toDataURL('image/jpeg',.72)); }; img.onerror=reject; img.src=r.result; }; r.onerror=reject; r.readAsDataURL(file); }); }
 
@@ -880,22 +1016,24 @@ function buildPlanAIPayload(mode='initial', extra={}){
     kind:'workout-plan',
     mode,
     cycleChangeRequest: extra.cycleChangeRequest || '',
-    profile:{name:p.name, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:p.experience, daysPerWeek:p.daysPerWeek, notes:p.notes},
-    currentPlan:{title:p.planMeta?.title, cycle:p.planMeta?.cycle, workouts:p.workouts},
-    progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, Math.floor((p.progress||0)/5)+1)},
+    profile:{name:p.name, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
+    planRules:{daysPerWeek:clampTrainingDays(p.daysPerWeek), level:normalizeExperienceLabel(p.experience), allowedWorkoutIds:WORKOUT_LETTERS.slice(0, clampTrainingDays(p.daysPerWeek))},
+    defaultTemplate:templateForProfile(p),
+    currentPlan:{title:p.planMeta?.title, cycle:p.planMeta?.cycle, source:p.planMeta?.source, workouts:p.workouts},
+    progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, currentCycleNumber(p)+1)},
     recentHistory:p.history.slice(-12).map(h=>({date:h.date, workoutId:h.workoutId, workoutName:h.workoutName, score:h.score, doneCount:h.doneCount, skippedCount:h.skippedCount, weights:h.weights, status:h.status, meta:h.meta, aiReport:h.aiReport}))
   };
 }
 function normalizeAIPlan(plan, mode='initial'){
   const list = Array.isArray(plan?.workouts) ? plan.workouts : [];
-  const ids = ['A','B','C','D','E'];
+  const ids = WORKOUT_LETTERS.slice(0, clampTrainingDays(profile().daysPerWeek));
   const workouts = ids.map((id, idx)=>{
     const source = list.find(w=>String(w.id||'').toUpperCase()===id) || list[idx] || null;
     const exs = Array.isArray(source?.exercises) ? source.exercises : [];
     return {
       id,
-      name: String(source?.name || DEFAULT_WORKOUTS[idx]?.name || `Treino ${id}`),
-      focus: String(source?.focus || source?.description || DEFAULT_WORKOUTS[idx]?.focus || ''),
+      name: String(source?.name || templateForProfile(profile()).workouts[idx]?.name || `Treino ${id}`),
+      focus: String(source?.focus || source?.description || templateForProfile(profile()).workouts[idx]?.focus || ''),
       exercises: exs.slice(0,12).map((item, n)=>({
         id: `${id.toLowerCase()}_ai_${Date.now()}_${n}`,
         name: String(item?.name || item?.exercise || `Exercício ${n+1}`),
@@ -904,7 +1042,7 @@ function normalizeAIPlan(plan, mode='initial'){
       })).filter(e=>e.name.trim())
     };
   });
-  workouts.forEach((w, i)=>{ if(!w.exercises.length) w.exercises = structuredClone(DEFAULT_WORKOUTS[i].exercises); });
+  workouts.forEach((w, i)=>{ if(!w.exercises.length) w.exercises = structuredClone(templateForProfile(profile()).workouts[i]?.exercises || []); });
   return {
     title: String(plan?.title || (mode==='cycle' ? 'Ciclo ajustado pela IA' : 'Treino de adaptação com IA')),
     notes: String(plan?.notes || plan?.explanation || ''),
@@ -965,7 +1103,7 @@ function askCycleChangeRequest(){
 }
 async function finishCycleAndGeneratePlan(){
   const p=profile();
-  if(p.progress < 5) return toast('Complete pelo menos 1 ciclo antes de ajustar com IA.');
+  if(p.progress < workoutsPerCycle(p)) return toast(`Complete pelo menos 1 ciclo (${workoutsPerCycle(p)} treinos) antes de ajustar com IA.`);
   const cycleChangeRequest = await askCycleChangeRequest();
   if(cycleChangeRequest === null) return;
   try{
