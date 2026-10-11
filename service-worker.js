@@ -1,4 +1,4 @@
-const CACHE_NAME = 'treino-100-pro-v5-3-onboarding-local-ai';
+const CACHE_NAME = 'treino-100-pro-v5-4-ai-plan-onboarding';
 const ASSETS = [
   './',
   './index.html',

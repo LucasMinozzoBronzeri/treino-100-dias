@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'treino100Pro.v1';
 const AI_ENDPOINT_PATH = '/api/workout-report';
+const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_BACKEND_URL = 'https://treino-100-api.vercel.app';
 const AI_REQUIRES_LOGIN = true;
 const SUPABASE_URL = 'https://ppmlzpyxqtsgyhsyiuuh.supabase.co';
@@ -38,6 +39,7 @@ function ex(id,name,type){return {id,name,type,target:'4x12'};}
 let state = migrateState(load());
 let screen = 'home';
 let activeModalWorkout = null;
+let onboardingView = 'login';
 
 function defaultState(){
   const initialProfile = newProfile('');
@@ -45,8 +47,8 @@ function defaultState(){
 }
 function newProfile(name='Novo perfil'){
   return {
-    id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, age:'', height:'', weight:'', goal:'', focus:'', notes:'',
-    queue: ['A','B','C','D','E'], progress: 0, target: 100, workouts: structuredClone(DEFAULT_WORKOUTS),
+    id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, age:'', height:'', weight:'', goal:'', focus:'', notes:'', experience:'', daysPerWeek:'',
+    queue: ['A','B','C','D','E'], progress: 0, target: 100, workouts: structuredClone(DEFAULT_WORKOUTS), planMeta:{source:'default', cycle:1, title:'Treino padrão'},
     weights:{}, exerciseMeta:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], ai:{autoWorkoutReport:true}, createdAt: nowISO()
   };
 }
@@ -67,6 +69,9 @@ function profile(){ const p = state.profiles.find(p=>p.id===state.activeProfileI
 function ensureProfile(p){
   if(!p) return p;
   if(!p.ai) p.ai={autoWorkoutReport:true};
+  if(!p.planMeta) p.planMeta={source:'default', cycle:1, title:'Treino padrão'};
+  if(!('experience' in p)) p.experience='';
+  if(!('daysPerWeek' in p)) p.daysPerWeek='';
   p.ai.apiUrl = AI_BACKEND_URL;
   if(typeof p.ai.autoWorkoutReport !== 'boolean') p.ai.autoWorkoutReport = true;
   if(!Array.isArray(p.history)) p.history=[];
@@ -174,43 +179,54 @@ function render(){
 }
 
 function renderOnboarding(){
-  return `<section class="welcome-hero">
+  if(onboardingView === 'signup') return renderSignupOnboarding();
+  if(onboardingView === 'local') return renderLocalOnboarding();
+  return `<section class="welcome-hero login-hero">
     <div class="welcome-copy">
       <p class="eyebrow">Treino 100 Dias Pro</p>
-      <h2>Comece do jeito certo</h2>
-      <p>Crie uma conta para salvar na nuvem ou entre em modo local para testar no aparelho. A IA funciona nos dois modos enquanto o projeto estiver liberado.</p>
+      <h2>Seu treino, seus dados, sua evolução.</h2>
+      <p>Entre para sincronizar na nuvem, gerar relatórios com IA e acompanhar sua evolução por ciclos.</p>
       <div class="mini-status"><span>${cloudStatusHTML()}</span><span>${isOffline()?'offline':'online'}</span></div>
     </div>
   </section>
-  <section class="onboarding-grid">
-    <div class="card onboarding-card">
-      <div class="card-title"><div><h3>Já tenho conta</h3><p>Entrar e sincronizar seus dados.</p></div></div>
+  <section class="auth-center">
+    <div class="card auth-card">
+      <div class="card-title"><div><h3>Entrar</h3><p>Acesse sua conta para continuar.</p></div></div>
       <div class="form-grid single">
         <div class="field"><label>E-mail</label><input class="input" id="loginEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div>
         <div class="field"><label>Senha</label><input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="sua senha"></div>
       </div>
       <div class="actions"><button class="btn full" data-onboarding="login">Entrar</button></div>
-    </div>
-
-    <div class="card onboarding-card featured">
-      <div class="card-title"><div><h3>Criar conta</h3><p>Perfil completo + nuvem + IA.</p></div><span class="badge green">Recomendado</span></div>
-      ${onboardingProfileFields('signup')}
-      <div class="form-grid">
-        <div class="field"><label>E-mail</label><input class="input" id="signupEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div>
-        <div class="field"><label>Senha</label><input class="input" id="signupPassword" type="password" autocomplete="new-password" placeholder="mínimo 6 caracteres"></div>
+      <div class="auth-links">
+        <button type="button" data-onboarding="show-signup">Criar conta</button>
+        <span>•</span>
+        <button type="button" data-onboarding="show-local">Iniciar localmente</button>
       </div>
-      <p class="form-error hidden" id="signupError"></p>
-      <div class="actions"><button class="btn full" data-onboarding="signup">Criar conta</button></div>
-    </div>
-
-    <div class="card onboarding-card">
-      <div class="card-title"><div><h3>Entrar localmente</h3><p>Usar sem conta. Treinos ficam neste aparelho.</p></div></div>
-      ${onboardingProfileFields('local')}
-      <p class="form-error hidden" id="localError"></p>
-      <div class="actions"><button class="btn secondary full" data-onboarding="local">Usar modo local</button></div>
-      <p class="muted">No modo local, a IA usa uma sessão anônima do Supabase. Se limpar os dados do navegador, o acesso local e histórico podem ser perdidos.</p>
     </div>
   </section>`;
+}
+function renderSignupOnboarding(){
+  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Criar conta</p><h2>Monte seu perfil inicial</h2><p>Com esses dados, a IA gera um treino de adaptação. Você pode editar tudo depois.</p></div></section>
+  <section class="auth-center"><div class="card auth-card wide">
+    <div class="card-title"><div><h3>Dados da conta</h3><p>Perfil + login + primeiro treino com IA.</p></div><span class="badge green">IA inclusa</span></div>
+    ${onboardingProfileFields('signup')}
+    <div class="form-grid">
+      <div class="field"><label>E-mail</label><input class="input" id="signupEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div>
+      <div class="field"><label>Senha</label><input class="input" id="signupPassword" type="password" autocomplete="new-password" placeholder="mínimo 6 caracteres"></div>
+    </div>
+    <p class="form-error hidden" id="signupError"></p>
+    <div class="actions"><button class="btn full" data-onboarding="signup">Criar conta e gerar treino</button><button class="btn secondary full" data-onboarding="show-login">Voltar ao login</button></div>
+  </div></section>`;
+}
+function renderLocalOnboarding(){
+  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Modo local</p><h2>Começar sem criar conta</h2><p>Os dados ficam neste aparelho. A IA funciona com sessão anônima enquanto estiver liberada.</p></div></section>
+  <section class="auth-center"><div class="card auth-card wide">
+    <div class="card-title"><div><h3>Perfil local</h3><p>Preencha para a IA gerar o treino de adaptação.</p></div><span class="badge yellow">Local</span></div>
+    ${onboardingProfileFields('local')}
+    <p class="form-error hidden" id="localError"></p>
+    <div class="actions"><button class="btn full" data-onboarding="local">Iniciar localmente e gerar treino</button><button class="btn secondary full" data-onboarding="show-login">Voltar ao login</button></div>
+    <p class="muted">Se limpar os dados do navegador, o histórico local pode ser perdido. Para recuperar em outro dispositivo, use uma conta.</p>
+  </div></section>`;
 }
 function onboardingProfileFields(prefix){
   return `<div class="form-grid">
@@ -218,13 +234,20 @@ function onboardingProfileFields(prefix){
     <div class="field"><label>Idade</label><input class="input" id="${prefix}Age" type="number" min="12" max="99" placeholder="ex: 21"></div>
     <div class="field"><label>Altura</label><input class="input" id="${prefix}Height" inputmode="decimal" placeholder="ex: 1,88"></div>
     <div class="field"><label>Peso inicial</label><input class="input" id="${prefix}Weight" inputmode="decimal" placeholder="ex: 83,2"></div>
-    <div class="field" style="grid-column:1/-1"><label>Objetivo</label><input class="input" id="${prefix}Goal" placeholder="ex: ganhar massa e secar"></div>
+    <div class="field"><label>Objetivo</label><input class="input" id="${prefix}Goal" placeholder="ex: ganhar massa e secar"></div>
+    <div class="field"><label>Foco principal</label><input class="input" id="${prefix}Focus" placeholder="ex: peito, braços, recomposição"></div>
+    <div class="field"><label>Experiência</label><select class="select" id="${prefix}Experience"><option value="">Selecione</option><option>Iniciante</option><option>Intermediário</option><option>Avançado</option></select></div>
+    <div class="field"><label>Dias por semana</label><select class="select" id="${prefix}Days"><option value="5">5 dias</option><option value="3">3 dias</option><option value="4">4 dias</option><option value="6">6 dias</option></select></div>
+    <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea id="${prefix}Notes" placeholder="Dor, limitação, tempo de treino, equipamento, preferências..."></textarea></div>
   </div>`;
 }
 function bindOnboarding(){
   document.querySelectorAll('[data-onboarding]').forEach(btn=>btn.onclick=()=>handleOnboarding(btn.dataset.onboarding));
 }
 function handleOnboarding(action){
+  if(action==='show-signup'){ onboardingView='signup'; render(); return; }
+  if(action==='show-local'){ onboardingView='local'; render(); return; }
+  if(action==='show-login'){ onboardingView='login'; render(); return; }
   if(action==='login') return onboardingLogin();
   if(action==='signup') return onboardingSignup();
   if(action==='local') return onboardingLocal();
@@ -237,7 +260,11 @@ function readOnboardingProfile(prefix){
     age: byId(prefix+'Age')?.value?.trim() || '',
     height: byId(prefix+'Height')?.value?.trim() || '',
     weight: byId(prefix+'Weight')?.value?.trim() || '',
-    goal: byId(prefix+'Goal')?.value?.trim() || ''
+    goal: byId(prefix+'Goal')?.value?.trim() || '',
+    focus: byId(prefix+'Focus')?.value?.trim() || '',
+    experience: byId(prefix+'Experience')?.value?.trim() || '',
+    daysPerWeek: byId(prefix+'Days')?.value?.trim() || '',
+    notes: byId(prefix+'Notes')?.value?.trim() || ''
   };
 }
 function showFormError(id, message){
@@ -255,6 +282,9 @@ function validateProfileInfo(info){
   const weight=parseNumberValue(info.weight);
   if(!weight || weight < 30 || weight > 300) return 'Informe um peso inicial válido.';
   if(!info.goal || info.goal.length < 3) return 'Informe seu objetivo.';
+  if(!info.focus || info.focus.length < 2) return 'Informe seu foco principal.';
+  if(!info.experience) return 'Informe sua experiência.';
+  if(!info.daysPerWeek) return 'Informe quantos dias por semana pretende treinar.';
   return '';
 }
 function applyProfileInfo(info){
@@ -264,6 +294,10 @@ function applyProfileInfo(info){
   p.height=info.height;
   p.weight=info.weight;
   p.goal=info.goal;
+  p.focus=info.focus;
+  p.experience=info.experience;
+  p.daysPerWeek=info.daysPerWeek;
+  p.notes=info.notes;
   ensureProfile(p);
   save();
 }
@@ -300,9 +334,9 @@ async function onboardingSignup(){
   state.onboardingDone=true;
   state.entryMode='account';
   save();
-  if(cloudUser) await upsertCloudProfile(info.name);
+  if(cloudUser){ await upsertCloudProfile(info.name); await generateInitialPlanFromAI({silent:false}); }
   screen='home';
-  toast(data?.session ? 'Conta criada e conectada.' : 'Conta criada. Confirme seu e-mail se o Supabase pedir.');
+  toast(data?.session ? 'Conta criada e treino de adaptação preparado.' : 'Conta criada. Confirme seu e-mail para liberar IA e nuvem.');
   render();
 }
 async function onboardingLocal(){
@@ -318,7 +352,8 @@ async function onboardingLocal(){
       const { data, error } = await supabaseClient.auth.signInAnonymously({options:{data:{display_name:info.name, entry_mode:'local'}}});
       if(error) throw error;
       cloudUser=data?.user || null;
-      toast('Modo local ativado com IA online.');
+      await generateInitialPlanFromAI({silent:false});
+      toast('Modo local ativado com IA e treino de adaptação.');
     }catch(e){
       toast('Modo local ativado. IA online precisa de login anônimo habilitado no Supabase.');
     }
@@ -343,6 +378,11 @@ function renderHome(){
         </div>
         <div class="progress-ring" style="--p:${pct}%"><div class="progress-ring-inner">${p.progress}/${p.target}<small>${pct}%</small></div></div>
       </div>
+    </section>
+    <section class="card plan-card">
+      <div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title || 'Treino padrão')} • Ciclo ${p.planMeta?.cycle || Math.max(1, cycles+1)}</p></div><span class="badge ${p.planMeta?.source==='ai'?'green':'orange'}">${p.planMeta?.source==='ai'?'IA':'Padrão'}</span></div>
+      <p class="muted">${esc(p.planMeta?.notes || 'Use os dados dos treinos para ajustar o próximo ciclo com IA.')}</p>
+      <div class="actions"><button class="btn sm secondary" data-action="generate-initial-plan">Gerar/atualizar treino com IA</button><button class="btn sm ${p.progress>=5?'':'secondary'}" ${p.progress>=5?'':'disabled'} data-action="finish-cycle-ai">Finalizar ciclo e ajustar treino</button></div>
     </section>
     <section class="card">
       <div class="card-title"><h3>Próximo treino</h3><span class="badge orange">${w.id}</span></div>
@@ -424,7 +464,7 @@ function historyRowHTML(h){
 
 
 function renderProfile(){ const p=profile(); const ai=p.ai||{}; return `<section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais. Se entrar na conta, salva também na nuvem.</p></div><div class="form-grid">
-  ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}
+  ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}${inputHTML('experience','Experiência',p.experience)}${inputHTML('daysPerWeek','Dias por semana',p.daysPerWeek)}
   <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div></div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button><button class="btn secondary" data-action="new-profile">Novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
   <section class="card"><div class="card-title"><div><h3>Conta e sincronização</h3><p>Sem login o app continua funcionando só neste aparelho. Com login, salva também no Supabase.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}</section>
   <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Backend configurado no app. Para gerar relatório, o usuário precisa estar logado e online.</p></div><span class="badge green">Pronta</span></div><div class="form-grid">
@@ -468,6 +508,8 @@ function handleAction(a){
   if(a==='cloud-logout') cloudLogout();
   if(a==='cloud-sync') syncLocalHistoryToCloud();
   if(a==='cloud-refresh') refreshLocalOrCloudStatus();
+  if(a==='generate-initial-plan') generateInitialPlanFromAI({silent:false, force:true});
+  if(a==='finish-cycle-ai') finishCycleAndGeneratePlan();
 }
 
 
@@ -711,7 +753,7 @@ async function upsertCloudProfile(name){
   const user=await getCurrentCloudUser();
   if(!user) return;
   const p=profile();
-  await supabaseClient.from('profiles').upsert({id:user.id, name:name || p.name || 'Usuário', age:parseNumberValue(p.age), height:parseNumberValue(p.height), initial_weight:parseNumberValue(p.weight), goal:p.goal || null, focus:p.focus || null});
+  await supabaseClient.from('profiles').upsert({id:user.id, name:name || p.name || 'Usuário', age:parseNumberValue(p.age), height:parseNumberValue(p.height), initial_weight:parseNumberValue(p.weight), goal:p.goal || null, focus:p.focus || null, notes:p.notes || null, experience:p.experience || null, days_per_week:parseNumberValue(p.daysPerWeek)});
 }
 function reportToText(report){
   if(!report) return '';
@@ -828,6 +870,115 @@ async function testAIConnection(){
     toast('IA respondeu com sucesso.');
   }catch(err){
     toast('Teste falhou: '+(err.message||'erro'));
+  }
+}
+
+
+function buildPlanAIPayload(mode='initial', extra={}){
+  const p=profile();
+  return {
+    kind:'workout-plan',
+    mode,
+    cycleChangeRequest: extra.cycleChangeRequest || '',
+    profile:{name:p.name, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:p.experience, daysPerWeek:p.daysPerWeek, notes:p.notes},
+    currentPlan:{title:p.planMeta?.title, cycle:p.planMeta?.cycle, workouts:p.workouts},
+    progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, Math.floor((p.progress||0)/5)+1)},
+    recentHistory:p.history.slice(-12).map(h=>({date:h.date, workoutId:h.workoutId, workoutName:h.workoutName, score:h.score, doneCount:h.doneCount, skippedCount:h.skippedCount, weights:h.weights, status:h.status, meta:h.meta, aiReport:h.aiReport}))
+  };
+}
+function normalizeAIPlan(plan, mode='initial'){
+  const list = Array.isArray(plan?.workouts) ? plan.workouts : [];
+  const ids = ['A','B','C','D','E'];
+  const workouts = ids.map((id, idx)=>{
+    const source = list.find(w=>String(w.id||'').toUpperCase()===id) || list[idx] || null;
+    const exs = Array.isArray(source?.exercises) ? source.exercises : [];
+    return {
+      id,
+      name: String(source?.name || DEFAULT_WORKOUTS[idx]?.name || `Treino ${id}`),
+      focus: String(source?.focus || source?.description || DEFAULT_WORKOUTS[idx]?.focus || ''),
+      exercises: exs.slice(0,12).map((item, n)=>({
+        id: `${id.toLowerCase()}_ai_${Date.now()}_${n}`,
+        name: String(item?.name || item?.exercise || `Exercício ${n+1}`),
+        type: String(item?.type || item?.equipment || 'personalizado'),
+        target: String(item?.target || item?.setsReps || item?.reps || '3x10-12')
+      })).filter(e=>e.name.trim())
+    };
+  });
+  workouts.forEach((w, i)=>{ if(!w.exercises.length) w.exercises = structuredClone(DEFAULT_WORKOUTS[i].exercises); });
+  return {
+    title: String(plan?.title || (mode==='cycle' ? 'Ciclo ajustado pela IA' : 'Treino de adaptação com IA')),
+    notes: String(plan?.notes || plan?.explanation || ''),
+    workouts
+  };
+}
+function applyAIPlan(plan, mode='initial'){
+  const p=profile();
+  const normalized=normalizeAIPlan(plan, mode);
+  p.workouts=normalized.workouts;
+  p.queue=normalized.workouts.map(w=>w.id);
+  p.tempDone={};
+  p.tempStatus={};
+  p.planMeta={source:'ai', cycle: mode==='cycle' ? (p.planMeta?.cycle||1)+1 : (p.planMeta?.cycle||1), title:normalized.title, notes:normalized.notes, updatedAt:nowISO()};
+  save();
+}
+async function callPlanAI(mode='initial', extra={}){
+  if(isOffline()) throw new Error('Você está offline. A IA não consegue gerar treino agora.');
+  const accessToken=await getCloudAccessToken();
+  if(!accessToken) throw new Error('Entre na conta ou use modo local para gerar treino com IA.');
+  const response=await fetch(aiUrl(profile(), AI_PLAN_ENDPOINT_PATH),{
+    method:'POST',
+    headers:{'Content-Type':'application/json', 'Authorization': `Bearer ${accessToken}`},
+    body:JSON.stringify(buildPlanAIPayload(mode, extra))
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok) throw new Error(data.error || `Erro HTTP ${response.status}`);
+  return data.plan || data;
+}
+async function generateInitialPlanFromAI(opts={}){
+  const p=profile();
+  if(!opts.force && p.planMeta?.source==='ai') return;
+  try{
+    if(!opts.silent) toast('Gerando treino de adaptação com IA...');
+    const plan=await callPlanAI('initial');
+    applyAIPlan(plan, 'initial');
+    render();
+    if(!opts.silent) toast('Treino de adaptação criado pela IA.');
+  }catch(e){
+    console.warn('Plano IA falhou:', e);
+    if(!opts.silent) toast('Não consegui gerar o treino com IA. Mantive o treino padrão.');
+  }
+}
+function askCycleChangeRequest(){
+  return new Promise((resolve)=>{
+    const layer=byId('modalLayer');
+    layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Próximo ciclo</p><h2>O que você quer mudar?</h2><p class="muted">Escreva pedidos para a IA considerar no ajuste do próximo ciclo. É opcional.</p></div><button class="close" data-cycle-cancel>×</button></div>
+      <div class="card subtle-card"><p class="small">Exemplos: quero focar mais em braço, achei perna muito pesado, quero treinos mais curtos, trocar exercício que dói o ombro, evitar agachamento livre.</p></div>
+      <div class="field"><label>Pedido para o próximo ciclo</label><textarea id="cycleChangeRequest" placeholder="Ex: quero focar mais em peito e braço, reduzir exercícios que forçam o ombro e deixar o treino em até 60 minutos."></textarea></div>
+      <div class="actions"><button class="btn" data-cycle-generate>Gerar próximo ciclo</button><button class="btn secondary" data-cycle-skip>Gerar sem pedir mudanças</button><button class="btn secondary" data-cycle-cancel>Cancelar</button></div>
+    </div>`;
+    layer.classList.remove('hidden');
+    const finish=(value)=>{ layer.classList.add('hidden'); layer.innerHTML=''; resolve(value); };
+    document.querySelectorAll('[data-cycle-cancel]').forEach(b=>b.onclick=()=>finish(null));
+    document.querySelector('[data-cycle-skip]').onclick=()=>finish('');
+    document.querySelector('[data-cycle-generate]').onclick=()=>finish((byId('cycleChangeRequest')?.value || '').trim());
+  });
+}
+async function finishCycleAndGeneratePlan(){
+  const p=profile();
+  if(p.progress < 5) return toast('Complete pelo menos 1 ciclo antes de ajustar com IA.');
+  const cycleChangeRequest = await askCycleChangeRequest();
+  if(cycleChangeRequest === null) return;
+  try{
+    toast('Analisando ciclo e gerando próximo treino...');
+    const plan=await callPlanAI('cycle', { cycleChangeRequest });
+    applyAIPlan(plan, 'cycle');
+    p.planMeta.lastCycleRequest = cycleChangeRequest || '';
+    screen='workouts';
+    save();
+    render();
+    toast('Novo ciclo gerado pela IA. Revise antes de treinar.');
+  }catch(e){
+    toast('Não consegui ajustar o ciclo: '+(e.message||'erro'));
   }
 }
 
