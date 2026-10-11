@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '6.7.0';
+const APP_VERSION = '6.8.0';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -287,6 +287,8 @@ function ensureProfile(p){
   if(!Array.isArray(p.history)) p.history=[];
   if(!Array.isArray(p.dailyCheckins)) p.dailyCheckins=[];
   if(!p.nutritionChecks) p.nutritionChecks={};
+  if(!Array.isArray(p.quickCoachLogs)) p.quickCoachLogs=[];
+  if(!('activeWorkoutAdjustment' in p)) p.activeWorkoutAdjustment=null;
   if(!Array.isArray(p.checkins)) p.checkins=[];
   if(!Array.isArray(p.bio)) p.bio=[];
   return p;
@@ -412,6 +414,99 @@ function openScoreModal(){
   document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>{ const a=b.dataset.action; closeModal(); handleAction(a); });
 }
 
+const QUICK_COACH_MODES = {
+  short:{icon:'⏱️', title:'Estou sem tempo', tag:'Treino rápido', desc:'Prioriza o essencial e corta acessórios.'},
+  tired:{icon:'😮‍💨', title:'Estou muito cansado', tag:'Dia controlado', desc:'Reduz intensidade e foca execução.'},
+  pain:{icon:'⚠️', title:'Estou com dor/desconforto', tag:'Proteção', desc:'Evita forçar região dolorida.'},
+  crowded:{icon:'🏟️', title:'Academia cheia', tag:'Plano alternativo', desc:'Sugere trocas para halter, cabo ou peso livre.'},
+  swap:{icon:'🔁', title:'Quero trocar exercício', tag:'Substituição', desc:'Ajuda a trocar um exercício sem bagunçar o treino.'}
+};
+function quickCoachModeInfo(mode){
+  return QUICK_COACH_MODES[mode] || QUICK_COACH_MODES.short;
+}
+function currentAdjustment(p=profile()){
+  const adj=p.activeWorkoutAdjustment;
+  if(!adj) return null;
+  if(adj.dateKey!==dateKey()) return null;
+  const w=currentWorkout(p);
+  if(w && adj.workoutId && adj.workoutId!==w.id) return null;
+  return adj;
+}
+function quickCoachPlan(mode, p=profile()){
+  const w=currentWorkout(p);
+  const info=quickCoachModeInfo(mode);
+  const exercises=w?.exercises || [];
+  const strength=exercises.filter(e=>exerciseKind(e)==='strength');
+  const nonCardio=exercises.filter(e=>exerciseKind(e)!=='cardio');
+  const cardio=exercises.filter(e=>exerciseKind(e)==='cardio');
+  let focus=[], instructions=[], caution='';
+  if(mode==='short'){
+    focus=nonCardio.slice(0,4);
+    instructions=['Faça aquecimento curto de 5 minutos.','Priorize os exercícios principais.','Use descanso de 60–90s.','Se sobrar tempo, finalize com cardio leve curto.'];
+    caution='Não tente compensar com carga exagerada.';
+  }else if(mode==='tired'){
+    focus=nonCardio.slice(0, Math.min(5, nonCardio.length));
+    instructions=['Reduza 10–20% da carga normal.','Deixe 2–3 repetições na reserva.','Evite falha muscular hoje.','Se o corpo piorar, encerre mais cedo.'];
+    caution='Dia cansado ainda conta: objetivo é manter consistência.';
+  }else if(mode==='pain'){
+    focus=nonCardio.slice(0, Math.min(4, nonCardio.length));
+    instructions=['Não force exercício que cause dor aguda.','Troque amplitude/carga ou pule o exercício problemático.','Prefira execução controlada e aquecimento maior.','Dor forte, tontura ou formigamento: encerre e procure orientação.'];
+    caution='Dor não é “frescura”; é dado para ajustar o treino.';
+  }else if(mode==='crowded'){
+    focus=nonCardio.slice(0, Math.min(5, nonCardio.length));
+    instructions=['Se máquina estiver ocupada, use variação similar.','Priorize padrões: empurrar, puxar, agachar, dobradiça, core.','Mantenha o mesmo grupo muscular, mesmo que troque o aparelho.','Evite esperar muito tempo parado.'];
+    caution='Trocar equipamento é melhor do que perder o treino.';
+  }else{
+    focus=nonCardio.slice(0, Math.min(5, nonCardio.length));
+    instructions=['Escolha exercício que treine o mesmo músculo.','Mantenha séries/reps parecidas.','Registre a troca na observação.','Se a troca virar fixa, edite o treino depois.'];
+    caution='Troca boa mantém o objetivo do exercício original.';
+  }
+  if(!focus.length) focus=exercises.slice(0,4);
+  return {mode, info, workout:w, focus, cardio, instructions, caution};
+}
+function quickCoachPlanHTML(mode, p=profile()){
+  const plan=quickCoachPlan(mode,p);
+  if(!plan.workout) return '<div class="empty">Gere um treino primeiro para usar o ajuste rápido.</div>';
+  return `<div class="quick-coach-plan">
+    <div class="alert orange"><div>${plan.info.icon}</div><div><strong>${esc(plan.info.tag)}</strong><p>${esc(plan.info.desc)}</p></div></div>
+    <div class="quick-priority"><h3>Prioridade de hoje</h3>${plan.focus.map((e,i)=>`<div class="history-row"><div><strong>${i+1}. ${esc(e.name)}</strong><span>${esc(exerciseKind(e))} • meta ${esc(e.target||'')}</span></div><span class="badge orange">${i<3?'essencial':'se der'}</span></div>`).join('')}</div>
+    <div class="quick-rules"><h3>Regras do ajuste</h3>${plan.instructions.map(x=>`<p>• ${esc(x)}</p>`).join('')}<p><b>Atenção:</b> ${esc(plan.caution)}</p></div>
+  </div>`;
+}
+function openQuickCoachModal(mode=null){
+  const p=profile();
+  const w=currentWorkout(p);
+  const layer=byId('modalLayer');
+  if(!mode){
+    layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Coach rápido</p><h2>Ajustar treino de hoje</h2><p class="muted">Escolha a situação. O app adapta a estratégia sem destruir seu plano original.</p></div><button class="close" data-close>×</button></div>
+      ${w?`<div class="alert"><div>🏋️</div><div><strong>Treino atual: ${esc(w.id)} — ${esc(w.name)}</strong><p>${w.exercises.length} exercícios • ${esc(w.focus||'')}</p></div></div>`:'<div class="empty">Nenhum treino ativo ainda.</div>'}
+      <div class="quick-grid coach-grid">${Object.entries(QUICK_COACH_MODES).map(([key,item])=>`<button class="quick-item" data-quick-coach-mode="${key}"><b>${item.icon}</b><span><strong>${item.title}</strong><small>${item.desc}</small></span></button>`).join('')}</div>
+    </div>`;
+  }else{
+    const plan=quickCoachPlan(mode,p);
+    layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Coach rápido</p><h2>${plan.info.icon} ${esc(plan.info.title)}</h2><p class="muted">Ajuste para hoje. Você pode aplicar como nota e abrir o treino.</p></div><button class="close" data-close>×</button></div>
+      ${quickCoachPlanHTML(mode,p)}
+      <div class="actions"><button class="btn" data-apply-quick-coach="${mode}" ${plan.workout?'':'disabled'}>Aplicar e abrir treino</button><button class="btn secondary" data-quick-coach-back>Voltar</button><button class="btn secondary" data-close>Fechar</button></div>
+    </div>`;
+  }
+  layer.classList.remove('hidden');
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
+  document.querySelectorAll('[data-quick-coach-mode]').forEach(b=>b.onclick=()=>openQuickCoachModal(b.dataset.quickCoachMode));
+  const back=document.querySelector('[data-quick-coach-back]'); if(back) back.onclick=()=>openQuickCoachModal();
+  document.querySelectorAll('[data-apply-quick-coach]').forEach(b=>b.onclick=()=>applyQuickCoach(b.dataset.applyQuickCoach));
+}
+function applyQuickCoach(mode){
+  const p=profile();
+  const w=currentWorkout(p);
+  if(!w) return toast('Gere um treino primeiro.');
+  const plan=quickCoachPlan(mode,p);
+  const adj={id:'qa_'+Date.now(), date:nowISO(), dateKey:dateKey(), workoutId:w.id, mode, title:plan.info.title, tag:plan.info.tag, focusExerciseIds:plan.focus.map(e=>e.id), notes:plan.instructions};
+  p.activeWorkoutAdjustment=adj;
+  p.quickCoachLogs.push(adj);
+  save();
+  toast('Ajuste rápido aplicado ao treino de hoje.');
+  openWorkout(w.id);
+}
 function dietMeals(diet){
   if(!diet) return [];
   const candidates = [
@@ -540,7 +635,7 @@ function todayMissionHTML(p=profile()){
       <p class="eyebrow">Hoje</p>
       <h2>${esc(missionTitle)}</h2>
       <p>${esc(missionText)}</p>
-      <div class="today-actions">${done?'<button class="btn secondary" data-screen-go="progress">Ver progresso</button>':hasPlan?`<button class="btn" data-action="start-current">Iniciar ${w.id}</button>`:`<button class="btn" data-action="generate-initial-plan">Gerar treino</button>`}<button class="btn secondary" data-action="daily-checkin">${daily?'Editar check-in':'Check-in rápido'}</button><button class="btn secondary" data-action="open-levels">Nv. ${levelInfo.roman}</button></div>
+      <div class="today-actions">${done?'<button class="btn secondary" data-screen-go="progress">Ver progresso</button>':hasPlan?`<button class="btn" data-action="start-current">Iniciar ${w.id}</button>`:`<button class="btn" data-action="generate-initial-plan">Gerar treino</button>`}<button class="btn secondary" data-action="quick-coach">Ajustar hoje</button><button class="btn secondary" data-action="daily-checkin">${daily?'Editar check-in':'Check-in rápido'}</button><button class="btn secondary" data-action="open-levels">Nv. ${levelInfo.roman}</button></div>
     </div>
     <div class="today-score" data-action="open-score">
       <div class="progress-ring small-ring" style="--p:${score}%"><div class="progress-ring-inner">${score}<small>score</small></div></div>
@@ -1499,7 +1594,7 @@ function renderHome(){
 }
 function pendingHTML(p){ return ''; }
 function workoutQueueCard(p,id,current=false){ const w=workoutById(p,id); if(!w) return ''; return `<div class="workout-card ${current?'current':''}" data-open-workout="${id}"><div class="workout-left"><div class="letter">${id}</div><div class="workout-name"><strong>${esc(w.name)}</strong><span>${current?'Liberado para concluir':'Modo consulta'} • ${w.exercises.length} exercícios</span></div></div><span class="badge ${current?'orange':''}">${current?'Atual':'Bloqueado'}</span></div>`; }
-function renderWorkouts(){ const p=profile(); if(!hasWorkoutPlan(p)) return `<section class="card"><div class="card-title"><div><h3>Nenhum treino ativo</h3><p>Gere um treino específico ou use o treino padrão para começar.</p></div></div><div class="actions"><button class="btn" data-action="generate-initial-plan">Gerar treino específico</button><button class="btn secondary" data-action="use-default-plan">Usar treino padrão</button></div></section>`; return `<section class="card"><div class="card-title"><div><h3>Treinos</h3><p>Você pode abrir todos, mas só conclui o treino da ordem.</p></div><button class="btn sm secondary" data-action="edit-current-workout">Editar atual</button></div><div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div></section><section class="card pro-tip"><div><span class="badge orange">PRO</span><h3>Editor liberado</h3><p>Agora você pode editar exercícios, ordem, nome, tipo e meta de reps direto no app.</p></div></section>`; }
+function renderWorkouts(){ const p=profile(); if(!hasWorkoutPlan(p)) return `<section class="card"><div class="card-title"><div><h3>Nenhum treino ativo</h3><p>Gere um treino específico ou use o treino padrão para começar.</p></div></div><div class="actions"><button class="btn" data-action="generate-initial-plan">Gerar treino específico</button><button class="btn secondary" data-action="use-default-plan">Usar treino padrão</button></div></section>`; return `<section class="card"><div class="card-title"><div><h3>Treinos</h3><p>Você pode abrir todos, mas só conclui o treino da ordem.</p></div><div class="actions inline-actions"><button class="btn sm" data-action="quick-coach">Ajuste rápido</button><button class="btn sm secondary" data-action="edit-current-workout">Editar atual</button></div></div><div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div></section><section class="card pro-tip"><div><span class="badge orange">PRO</span><h3>Editor liberado</h3><p>Agora você pode editar exercícios, ordem, nome, tipo e meta de reps direto no app.</p></div></section>`; }
 
 function renderProgress(){
   const p=profile(); const gains = exerciseGains(p); const cycles=currentCycleNumber(p); const levelInfo=levelFromXp(ensureGamification(p).xp);
@@ -1692,6 +1787,7 @@ function handleAction(a){
   if(a==='reset-nutrition-today') resetNutritionToday();
   if(a==='open-quick-menu') openQuickMenuModal();
   if(a==='open-score') openScoreModal();
+  if(a==='quick-coach') openQuickCoachModal();
   if(a==='open-levels') openLevelModal();
   if(a==='account-switch') openProfileSwitcher();
   if(a==='sync-xp-cloud') syncXpEventsToCloud({silent:false}).then(()=>render());
@@ -1749,6 +1845,8 @@ function exerciseHTML(p,w,e,isCurrent){
   const m=p.exerciseMeta[e.id] || {};
   const t=p.tempTimes?.[e.id] || {};
   const statusTime = t.completedAt ? `Concluído às ${fmtTime(t.completedAt)}` : t.skippedAt ? `Pulado às ${fmtTime(t.skippedAt)}` : '';
+  const adj=currentAdjustment(p);
+  const isQuickPriority=!!(adj?.focusExerciseIds||[]).includes(e.id);
   const weight=p.weights[e.id] || '';
   const locked=!isCurrent;
   const kind=exerciseKind(e);
@@ -1785,10 +1883,10 @@ function exerciseHTML(p,w,e,isCurrent){
       ${commonTail}`;
   const fields = kind==='cardio' ? cardioFields : kind==='core' ? coreFields : kind==='mobility' ? mobilityFields : strengthFields;
   const kindLabel = kind==='cardio' ? 'cardio' : kind==='core' ? 'core' : kind==='mobility' ? 'mobilidade' : (e.type||'força');
-  return `<div class="exercise ${done?'done':''} ${status==='skipped'?'skipped':''}" data-exercise-card="${e.id}">
+  return `<div class="exercise ${done?'done':''} ${status==='skipped'?'skipped':''} ${isQuickPriority?'quick-priority-ex':''}" data-exercise-card="${e.id}">
     <div class="exercise-top">
       <div><h4>${esc(e.name)}</h4><div class="small">${esc(kindLabel)} • meta ${esc(e.target||'4x12')}${statusTime ? ' • '+esc(statusTime) : ''}</div></div>
-      <span class="badge ${done?'green':status==='skipped'?'yellow':''}">${done?'Concluído':status==='skipped'?'Pulado':isCurrent?'Pendente':'Consulta'}</span>
+      <span class="badge ${done?'green':status==='skipped'?'yellow':isQuickPriority?'orange':''}">${done?'Concluído':status==='skipped'?'Pulado':isQuickPriority?'Prioridade':isCurrent?'Pendente':'Consulta'}</span>
     </div>
     <div class="exercise-controls ${kind==='cardio'?'cardio-controls':''}">
       ${fields}
@@ -1808,8 +1906,10 @@ function openWorkout(id){
     if(!p.tempTimes) p.tempTimes={};
     save();
   }
+  const adj=currentAdjustment(p);
   layer.innerHTML = `<div class="modal"><div class="modal-head"><div><p class="eyebrow">${isCurrent?'Treino liberado':'Modo consulta'}</p><h2>${w.id} — ${esc(w.name)}</h2><p class="muted">${isCurrent?'Você pode concluir exercícios e finalizar.':'Você pode consultar cargas, mas não concluir fora da ordem.'}</p></div><button class="close" data-close>×</button></div>
-  <div class="actions modal-actions-top"><button class="btn sm secondary" data-edit-workout="${w.id}">Editar treino</button><button class="btn sm secondary" data-close>Fechar</button></div>
+  <div class="actions modal-actions-top"><button class="btn sm" data-open-quick-coach>Ajuste rápido</button><button class="btn sm secondary" data-edit-workout="${w.id}">Editar treino</button><button class="btn sm secondary" data-close>Fechar</button></div>
+  ${adj?`<section class="card quick-active-card"><div class="card-title"><div><h3>${esc(adj.tag || 'Ajuste ativo')}</h3><p>${esc(adj.title || '')} • aplicado às ${fmtTime(adj.date)}</p></div><span class="badge orange">Hoje</span></div><p class="muted">${esc((adj.notes||[]).slice(0,2).join(' '))}</p></section>`:''}
   ${w.exercises.map(e=>exerciseHTML(p,w,e,isCurrent)).join('')}
   <div class="divider"></div><div class="actions"><button class="btn green" ${isCurrent?'':'disabled'} data-finalize-workout="${w.id}">Finalizar treino</button><button class="btn secondary" data-close>Fechar</button></div></div>`;
   layer.classList.remove('hidden');
@@ -1823,6 +1923,7 @@ function wireWorkoutModal(){
   document.querySelectorAll('[data-skip-ex]').forEach(b=>b.onclick=()=>skipExercise(b.dataset.skipEx));
   document.querySelectorAll('[data-finalize-workout]').forEach(b=>b.onclick=()=>finalizeWorkout(b.dataset.finalizeWorkout));
   document.querySelectorAll('[data-edit-workout]').forEach(b=>b.onclick=()=>openEditWorkout(b.dataset.editWorkout));
+  document.querySelectorAll('[data-open-quick-coach]').forEach(b=>b.onclick=()=>openQuickCoachModal());
 }
 
 function openEditWorkout(id){
@@ -1926,7 +2027,7 @@ function openQuickMenuModal(){
   layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Menu rápido</p><h2>Gym Bronze</h2><p class="muted">Atalhos para as áreas principais e ações rápidas.</p></div><button class="close" data-close>×</button></div>
     <div class="quick-grid">${items.map(([screenKey,icon,title,desc])=>`<button class="quick-item" data-quick-screen="${screenKey}"><b>${icon}</b><span><strong>${title}</strong><small>${desc}</small></span></button>`).join('')}</div>
     <div class="divider"></div>
-    <div class="actions"><button class="btn" data-quick-action="open-score">Score do dia</button><button class="btn secondary" data-quick-action="daily-checkin">Check-in rápido</button><button class="btn secondary" data-quick-action="account-switch">Alternar conta</button>${p.dietPlan?'<button class="btn secondary" data-quick-action="nutrition-checklist">Checklist nutri</button>':'<button class="btn secondary" data-quick-action="generate-diet-plan">Gerar nutri</button>'}</div>
+    <div class="actions"><button class="btn" data-quick-action="open-score">Score do dia</button><button class="btn secondary" data-quick-action="quick-coach">Ajuste rápido</button><button class="btn secondary" data-quick-action="daily-checkin">Check-in rápido</button><button class="btn secondary" data-quick-action="account-switch">Alternar conta</button>${p.dietPlan?'<button class="btn secondary" data-quick-action="nutrition-checklist">Checklist nutri</button>':'<button class="btn secondary" data-quick-action="generate-diet-plan">Gerar nutri</button>'}</div>
     <p class="muted">v${APP_VERSION}</p>
   </div>`;
   layer.classList.remove('hidden');
@@ -2035,6 +2136,7 @@ function buildWorkoutAIPayload(p, h){
     previousSameWorkout:previousSame,
     latestBio:p.bio?.slice(-1)[0] || null,
     todayReadiness:dailyCheckinToday(p),
+    activeWorkoutAdjustment:currentAdjustment(p),
     recentDailyCheckins:recentDailyCheckins(p,7),
     recentHistory:p.history.slice(-8).map(x=>({date:x.date, workoutId:x.workoutId, workoutName:x.workoutName, score:x.score, doneCount:x.doneCount, skippedCount:x.skippedCount}))
   };
