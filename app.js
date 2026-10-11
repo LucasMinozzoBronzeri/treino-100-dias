@@ -261,6 +261,10 @@ function ensureProfile(p){
   if(!p.planMeta) p.planMeta={source:'pending', cycle:1, title:'Aguardando treino inteligente'};
   if(!('sex' in p)) p.sex='';
   if(!('dietPlan' in p)) p.dietPlan=null;
+  if(!p.gamification) p.gamification={xp:0, xpEvents:[], lastLevelSeen:1};
+  if(!Array.isArray(p.gamification.xpEvents)) p.gamification.xpEvents=[];
+  if(!Number.isFinite(Number(p.gamification.xp))) p.gamification.xp=0;
+  if(!p.gamification.lastLevelSeen) p.gamification.lastLevelSeen=levelFromXp(p.gamification.xp).level;
   if(p.planMeta?.source === 'default' && p.planMeta.needsDefaultChoice === undefined) p.planMeta.needsDefaultChoice = true;
   if(!('experience' in p)) p.experience='';
   if(!('daysPerWeek' in p)) p.daysPerWeek='';
@@ -280,6 +284,145 @@ function esc(s){ return String(s ?? '').replace(/[&<>"]/g, m => ({'&':'&amp;','<
 function workoutById(p,id){ return p.workouts.find(w=>w.id===id); }
 function currentWorkout(p=profile()){ return workoutById(p, p.queue[0]); }
 function allExercises(p=profile()){ return p.workouts.flatMap(w=>w.exercises.map(e=>({...e, workoutId:w.id, workoutName:w.name}))); }
+
+const RANKS = [
+  {from:1,to:2,name:'Frango Recém-Matriculado',icon:'🐣',desc:'Começou agora, mas já saiu da promessa.'},
+  {from:3,to:5,name:'Frango Esforçado',icon:'🐥',desc:'Ainda é começo, mas já tem constância.'},
+  {from:6,to:9,name:'Frango Premium',icon:'🥚',desc:'Você já não é só promessa.'},
+  {from:10,to:14,name:'Projeto Shape',icon:'⚒️',desc:'Agora começou a ficar sério.'},
+  {from:15,to:20,name:'Shape em Construção',icon:'🏗️',desc:'O físico está tomando forma.'},
+  {from:21,to:27,name:'Aluno Aplicado',icon:'📋',desc:'Treina, registra e evolui com método.'},
+  {from:28,to:35,name:'Rato de Academia',icon:'🐀',desc:'A academia já virou parte da rotina.'},
+  {from:36,to:44,name:'Marombeiro Iniciante',icon:'💪',desc:'Já não parece perdido nos aparelhos.'},
+  {from:45,to:54,name:'Maromba em Ascensão',icon:'🔥',desc:'A consistência começou a aparecer no shape.'},
+  {from:55,to:64,name:'Físico Respeitável',icon:'🛡️',desc:'Já dá para perceber que você treina de verdade.'},
+  {from:65,to:74,name:'Maromba de Respeito',icon:'🏛️',desc:'Força, rotina e disciplina no mesmo pacote.'},
+  {from:75,to:84,name:'Monstro Controlado',icon:'🦍',desc:'Forte, mas ainda com cabeça no lugar.'},
+  {from:85,to:94,name:'Lenda da Academia',icon:'⚔️',desc:'A galera já repara quando você chega.'},
+  {from:95,to:99,name:'Final Boss do Shape',icon:'👑',desc:'Falta pouco para virar mito do Gym Bronze.'},
+  {from:100,to:100,name:'Mr. Gym Bronze',icon:'🏆',desc:'O topo da jornada. Respeita o Warrior.'}
+];
+function roman(n){
+  n=Math.max(1,Math.min(100,Number(n)||1));
+  const map=[['C',100],['XC',90],['L',50],['XL',40],['X',10],['IX',9],['V',5],['IV',4],['I',1]];
+  let out='';
+  for(const [r,v] of map){ while(n>=v){ out+=r; n-=v; } }
+  return out;
+}
+function xpForLevel(level){
+  level=Math.max(1,Math.min(100,Number(level)||1));
+  if(level<=1) return 0;
+  return Math.round(35 * Math.pow(level-1, 1.65));
+}
+function levelFromXp(xp){
+  xp=Math.max(0,Number(xp)||0);
+  let level=1;
+  for(let l=1;l<=100;l++){ if(xp>=xpForLevel(l)) level=l; else break; }
+  const current=xpForLevel(level);
+  const next=level>=100 ? current : xpForLevel(level+1);
+  const inLevel=Math.max(0,xp-current);
+  const needed=Math.max(1,next-current);
+  const pct=level>=100 ? 100 : Math.min(100, Math.round((inLevel/needed)*100));
+  return {level, roman:roman(level), xp, current, next, inLevel, needed, pct, toNext:Math.max(0,next-xp), rank:rankForLevel(level)};
+}
+function rankForLevel(level){
+  return RANKS.find(r=>level>=r.from && level<=r.to) || RANKS[0];
+}
+function xpBaseForExperience(exp){
+  const e=normalizeExperienceLabel(exp||'');
+  if(e==='Avançado') return 90;
+  if(e==='Intermediário') return 70;
+  return 50;
+}
+function exerciseIsCardio(e){
+  const s=String((e?.type||'')+' '+(e?.name||'')).toLowerCase();
+  return /cardio|bike|esteira|corrida|caminhada|el[ií]ptico|escada|aer[oó]b/.test(s);
+}
+function ensureGamification(p=profile()){
+  ensureProfile(p);
+  return p.gamification;
+}
+function awardWorkoutXP(p,w,record){
+  const g=ensureGamification(p);
+  if(g.xpEvents.some(ev=>ev.id===record.id)) return null;
+  const before=levelFromXp(g.xp);
+  const breakdown=[];
+  const base=xpBaseForExperience(p.experience);
+  breakdown.push({label:'Treino concluído',xp:base});
+  if(record.skippedCount===0) breakdown.push({label:'Sem pular exercício',xp:15});
+  const cardioDone=(w?.exercises||[]).some(e=>exerciseIsCardio(e) && p.tempDone[e.id]);
+  if(cardioDone) breakdown.push({label:'Cardio feito',xp:10});
+  const total=breakdown.reduce((sum,item)=>sum+item.xp,0);
+  g.xp += total;
+  const after=levelFromXp(g.xp);
+  const event={id:record.id, type:'workout', date:record.date, workoutId:record.workoutId, workoutName:record.workoutName, xp:total, breakdown, levelBefore:before.level, levelAfter:after.level};
+  g.xpEvents.push(event);
+  if(g.xpEvents.length>300) g.xpEvents=g.xpEvents.slice(-300);
+  g.lastLevelSeen=after.level;
+  record.xpAwarded=total;
+  record.xpBreakdown=breakdown;
+  record.levelBefore=before.level;
+  record.levelAfter=after.level;
+  return {total, breakdown, before, after};
+}
+function levelHeaderHTML(p=profile()){
+  const info=levelFromXp(ensureGamification(p).xp);
+  return `<div class="level-card-mini"><div class="level-card-row"><div class="level-badge">${esc(info.rank.icon)}</div><div><strong>${esc(info.rank.name)}</strong><span>Nv. ${info.roman} • faltam ${info.toNext} XP</span></div></div><div class="xp-bar"><i style="width:${info.pct}%"></i></div></div>`;
+}
+function updateLevelHeader(){
+  const btn=byId('openLevelModal');
+  if(!btn) return;
+  if(shouldShowOnboarding()){
+    btn.classList.add('hidden');
+    return;
+  }
+  const info=levelFromXp(ensureGamification(profile()).xp);
+  btn.classList.remove('hidden');
+  const icon=btn.querySelector('.level-icon');
+  const name=byId('activeRankName');
+  const lvl=byId('activeLevelText');
+  if(icon) icon.textContent=info.rank.icon;
+  if(name) name.textContent=info.rank.name;
+  if(lvl) lvl.textContent=`Nv. ${info.roman}`;
+}
+function openLevelModal(){
+  const p=profile();
+  const info=levelFromXp(ensureGamification(p).xp);
+  const nextRank=RANKS.find(r=>r.from>info.level);
+  const recent=[...(p.gamification?.xpEvents||[])].slice(-8).reverse();
+  const trail=RANKS.map(r=>{
+    const unlocked=info.level>=r.from;
+    const current=info.level>=r.from && info.level<=r.to;
+    const range=r.from===r.to ? roman(r.from) : `${roman(r.from)}–${roman(r.to)}`;
+    return `<div class="rank-row ${current?'current':''} ${unlocked?'unlocked':'locked'}">
+      <div class="rank-icon">${esc(r.icon)}</div>
+      <div><strong>${range} • ${esc(r.name)}</strong><span>${esc(r.desc)}</span></div>
+      <span class="badge ${current?'orange':unlocked?'green':''}">${current?'Atual':unlocked?'Liberado':'Bloqueado'}</span>
+    </div>`;
+  }).join('');
+  const layer=byId('modalLayer');
+  layer.innerHTML=`<div class="modal level-modal"><div class="modal-head"><div><p class="eyebrow">Trilha Gym Bronze</p><h2>${esc(info.rank.name)}</h2><p class="muted">Nível ${info.roman} (${info.level}) • ${info.xp} XP acumulados</p></div><button class="close" data-close>×</button></div>
+    <section class="level-hero-card">
+      <div class="level-big-icon">${esc(info.rank.icon)}</div>
+      <div class="level-hero-copy"><h3>Nv. ${info.roman} — ${esc(info.rank.name)}</h3><p>${esc(info.rank.desc)}</p><div class="xp-bar big"><i style="width:${info.pct}%"></i></div><small>${info.level>=100?'Você chegou ao topo.':'Faltam '+info.toNext+' XP para o nível '+roman(info.level+1)+' ('+(info.level+1)+').'}</small></div>
+    </section>
+    ${nextRank?`<section class="card compact-card"><div class="card-title"><h3>Próxima patente</h3><p>${roman(nextRank.from)} • ${esc(nextRank.name)} — desbloqueia no nível ${nextRank.from}</p></div></section>`:''}
+    <section class="card compact-card"><div class="card-title"><h3>Como ganhar XP</h3><p>Treinos mais avançados valem mais. Bônus vêm de consistência.</p></div>
+      <div class="xp-rules"><span>Iniciante +50</span><span>Intermediário +70</span><span>Avançado +90</span><span>Sem pular +15</span><span>Cardio +10</span></div>
+    </section>
+    <section class="card compact-card"><div class="card-title"><h3>Últimos ganhos</h3></div>${recent.length?recent.map(ev=>`<div class="history-row"><div><strong>+${ev.xp} XP</strong><span>${esc(ev.workoutName||'Treino')} • ${fmtDate(ev.date)}</span></div><span class="badge">Nv. ${roman(ev.levelAfter||info.level)}</span></div>`).join(''):'<div class="empty">Finalize um treino para começar a ganhar XP.</div>'}</section>
+    <section class="card compact-card"><div class="card-title"><h3>Patentes</h3><p>De frango recém-matriculado a Mr. Gym Bronze.</p></div><div class="rank-list">${trail}</div></section>
+  </div>`;
+  layer.classList.remove('hidden');
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
+}
+function levelUpToast(xpInfo){
+  if(!xpInfo) return 'Treino finalizado com sucesso.';
+  if(xpInfo.after.level > xpInfo.before.level){
+    return `+${xpInfo.total} XP. Subiu para Nv. ${xpInfo.after.roman} — ${xpInfo.after.rank.name}!`;
+  }
+  return `+${xpInfo.total} XP. Faltam ${xpInfo.after.toNext} XP para Nv. ${roman(xpInfo.after.level+1)}.`;
+}
 
 
 function normalizeSupabaseUrl(url){
@@ -386,6 +529,7 @@ function init(){
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.addEventListener('click',()=>setScreen(btn.dataset.screen)));
   byId('openProfileSwitcher').addEventListener('click', openProfileSwitcher);
+  byId('openLevelModal')?.addEventListener('click', openLevelModal);
   render();
 }
 function setScreen(s){ screen=s; render(); }
@@ -397,6 +541,7 @@ function render(){
     byId('screenTitle').textContent = 'Bem-vindo';
     byId('activeProfileName').textContent = 'Começar';
     byId('profileInitial').textContent = '+';
+    updateLevelHeader();
     document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
     byId('content').innerHTML = onlineNoticeHTML() + renderOnboarding();
     bindOnboarding();
@@ -406,6 +551,7 @@ function render(){
   byId('screenTitle').textContent = titleFor(screen);
   byId('activeProfileName').textContent = p.name || (isLocalMode() ? 'Modo local' : 'Perfil');
   byId('profileInitial').textContent = (p.name||'?').trim().charAt(0).toUpperCase();
+  updateLevelHeader();
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.screen===screen));
   const map = {home:renderHome, workouts:renderWorkouts, progress:renderProgress, checkin:renderCheckin, coach:renderCoach, profile:renderProfile};
   byId('content').innerHTML = onlineNoticeHTML() + map[screen]();
@@ -850,6 +996,7 @@ function renderHome(){
   const planBadge = planSource==='ai' ? 'IA' : planSource==='default' ? 'Padrão' : 'Pendente';
   const planBadgeClass = planSource==='ai' ? 'green' : planSource==='default' ? 'orange' : 'yellow';
   return `
+    ${levelHeaderHTML(p)}
     <section class="hero">
       <div class="hero-row">
         <div>
@@ -888,8 +1035,9 @@ function workoutQueueCard(p,id,current=false){ const w=workoutById(p,id); if(!w)
 function renderWorkouts(){ const p=profile(); if(!hasWorkoutPlan(p)) return `<section class="card"><div class="card-title"><div><h3>Nenhum treino ativo</h3><p>Gere um treino específico ou use o treino padrão para começar.</p></div></div><div class="actions"><button class="btn" data-action="generate-initial-plan">Gerar treino específico</button><button class="btn secondary" data-action="use-default-plan">Usar treino padrão</button></div></section>`; return `<section class="card"><div class="card-title"><div><h3>Treinos</h3><p>Você pode abrir todos, mas só conclui o treino da ordem.</p></div><button class="btn sm secondary" data-action="edit-current-workout">Editar atual</button></div><div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div></section><section class="card pro-tip"><div><span class="badge orange">PRO</span><h3>Editor liberado</h3><p>Agora você pode editar exercícios, ordem, nome, tipo e meta de reps direto no app.</p></div></section>`; }
 
 function renderProgress(){
-  const p=profile(); const gains = exerciseGains(p); const cycles=currentCycleNumber(p);
+  const p=profile(); const gains = exerciseGains(p); const cycles=currentCycleNumber(p); const levelInfo=levelFromXp(ensureGamification(p).xp);
   return `<section class="hero"><div class="hero-row"><div><p class="eyebrow">Evolução</p><h2>${p.progress}/${p.target} treinos</h2><p>${cycles} ciclos completos. Acompanhe cargas, consistência e estagnações.</p></div><div class="progress-ring" style="--p:${Math.round(p.progress/p.target*100)}%"><div class="progress-ring-inner">${p.progress}<small>treinos</small></div></div></div></section>
+  <section class="card level-progress-card"><div class="card-title"><div><h3>${esc(levelInfo.rank.name)}</h3><p>Nível ${levelInfo.roman} (${levelInfo.level}) • ${levelInfo.xp} XP totais</p></div><button class="btn sm secondary" data-action="open-levels">Ver patentes</button></div><div class="xp-bar big"><i style="width:${levelInfo.pct}%"></i></div><p class="muted">${levelInfo.level>=100?'Você chegou ao topo do Gym Bronze.':'Faltam '+levelInfo.toNext+' XP para o nível '+roman(levelInfo.level+1)+'.'}</p></section>
   <section class="grid two"><div class="stat"><strong>${gains.filter(g=>g.delta>0).length}</strong><span>exercícios com evolução</span></div><div class="stat"><strong>${stagnated(p).length}</strong><span>possíveis estagnados</span></div></section>
   <section class="card"><div class="card-title"><h3>Top evolução de carga</h3><p>Comparando primeiro e último registro</p></div>${gains.length?gains.slice(0,8).map(g=>`<div class="history-row"><div><strong>${esc(g.name)}</strong><span>${g.first} → ${g.last}</span></div><span class="badge green">+${g.delta}</span></div>`).join(''):'<div class="empty">Ainda não há histórico suficiente.</div>'}</section>
   <section class="card"><div class="card-title"><h3>Últimos treinos</h3></div>${p.history.slice(-8).reverse().map(h=>historyRowHTML(h)).join('') || '<div class="empty">Nenhum treino finalizado ainda.</div>'}</section>`;
@@ -957,7 +1105,7 @@ function historyRowHTML(h){
 }
 
 
-function renderProfile(){ const p=profile(); const ai=p.ai||{}; return `<section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais. Se entrar na conta, salva também na nuvem.</p></div><div class="form-grid">
+function renderProfile(){ const p=profile(); const ai=p.ai||{}; const levelInfo=levelFromXp(ensureGamification(p).xp); return `<section class="card profile-level-card"><div class="card-title"><div><p class="eyebrow">Warrior</p><h3>${esc(p.name || 'Meu perfil')}</h3><p>${esc(levelInfo.rank.name)} • Nv. ${levelInfo.roman} (${levelInfo.level})</p></div><div class="level-badge big">${esc(levelInfo.rank.icon)}</div></div><div class="xp-bar big"><i style="width:${levelInfo.pct}%"></i></div><p class="muted">${levelInfo.level>=100?'Mr. Gym Bronze desbloqueado.':'Faltam '+levelInfo.toNext+' XP para o próximo nível.'}</p><div class="actions"><button class="btn sm secondary" data-action="open-levels">Ver trilha de patentes</button></div></section><section class="card"><div class="card-title"><h3>Perfil</h3><p>Dados locais. Se entrar na conta, salva também na nuvem.</p></div><div class="form-grid">
   ${inputHTML('name','Nome',p.name)}${inputHTML('age','Idade',p.age,'number')}${selectHTML('sex','Sexo',p.sex,['Homem','Mulher','Outro/Prefiro não informar'])}${inputHTML('height','Altura',p.height)}${inputHTML('weight','Peso inicial/atual',p.weight)}${inputHTML('goal','Objetivo',p.goal)}${inputHTML('focus','Foco',p.focus)}${selectHTML('experience','Nível',p.experience,['Iniciante','Intermediário','Avançado'])}${selectHTML('daysPerWeek','Dias por semana',p.daysPerWeek,['2','3','4','5','6'], v=>v+' dias')}<div class="stat"><strong>${esc(p.programLabel || programLabelForProfile(p))}</strong><span>meta do programa</span></div>
   <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div></div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button><button class="btn secondary" data-action="new-profile">Novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
   <section class="card"><div class="card-title"><div><h3>Conta e sincronização</h3><p>Sem login o app continua funcionando só neste aparelho. Com login, salva também no Supabase.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}</section>
@@ -1012,6 +1160,7 @@ function handleAction(a){
   if(a==='accept-default-plan') { const p=profile(); if(p.planMeta) p.planMeta.needsDefaultChoice=false; save(); saveCurrentPlanToCloud('default_plan_accepted').catch(()=>{}); render(); toast('Treino padrão mantido.'); }
   if(a==='finish-cycle-ai') finishCycleAndGeneratePlan();
   if(a==='generate-diet-plan') generateDietPlan();
+  if(a==='open-levels') openLevelModal();
 }
 
 
@@ -1132,18 +1281,19 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
   const weights={}, status={}, metaSnap={}; w.exercises.forEach(e=>{ if(p.weights[e.id]) weights[e.id]=p.weights[e.id]; if(p.tempStatus[e.id]) status[e.id]=p.tempStatus[e.id]; if(p.exerciseMeta[e.id]) metaSnap[e.id]={...p.exerciseMeta[e.id]}; });
   const score = Math.max(0, Math.round(((doneCount + skippedCount*.35) / w.exercises.length) * 100));
   const record = {id:'h_'+Date.now(), date:nowISO(), workoutId:id, workoutName:w.name, doneCount, skippedCount, score, weights, status, meta:metaSnap};
+  const xpInfo = awardWorkoutXP(p,w,record);
   if(aiConfigured(p) && p.ai.autoWorkoutReport && canUseOnlineAI()) record.aiReportStatus='pending';
   else if(p.ai.autoWorkoutReport && isOffline()) record.aiReportError='IA pausada: você estava offline.';
   else if(p.ai.autoWorkoutReport && !cloudUser) record.aiReportError='IA pausada: entre na conta para gerar relatório.';
   p.history.push(record);
   p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={};
-  save(); closeModal(); toast(record.aiReportStatus==='pending' ? 'Treino finalizado. Gerando relatório com IA...' : (isOffline() ? 'Treino salvo offline neste aparelho.' : 'Treino finalizado com sucesso.'));
+  save(); closeModal(); toast(record.aiReportStatus==='pending' ? levelUpToast(xpInfo)+' Gerando relatório com IA...' : (isOffline() ? levelUpToast(xpInfo)+' Salvo offline neste aparelho.' : levelUpToast(xpInfo)));
   if(record.aiReportStatus==='pending') generateWorkoutAIReport(p.id, record.id);
   else saveWorkoutToCloud(p, record, {silent:true});
 
 }
 
-function openProfileSwitcher(){ const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Perfil</p><h2>Quem está treinando?</h2></div><button class="close" data-close>×</button></div><div class="profile-list">${state.profiles.map(p=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((p.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(p.name || 'Perfil')}</strong><div class="small">${p.progress}/${p.target} treinos</div></div></div><button class="btn sm ${p.id===state.activeProfileId?'green':'secondary'}" data-modal-switch-profile="${p.id}">${p.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div><div class="actions"><button class="btn" data-modal-new-profile>Novo perfil</button></div></div>`; layer.classList.remove('hidden'); document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=()=>{state.activeProfileId=b.dataset.modalSwitchProfile; save(); closeModal();}); document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();}; }
+function openProfileSwitcher(){ const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Perfil</p><h2>Quem está treinando?</h2></div><button class="close" data-close>×</button></div><div class="profile-list">${state.profiles.map(p=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((p.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(p.name || 'Perfil')}</strong><div class="small">${levelFromXp(ensureGamification(p).xp).rank.name} • Nv. ${levelFromXp(ensureGamification(p).xp).roman}</div></div></div><button class="btn sm ${p.id===state.activeProfileId?'green':'secondary'}" data-modal-switch-profile="${p.id}">${p.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('')}</div><div class="actions"><button class="btn" data-modal-new-profile>Novo perfil</button></div></div>`; layer.classList.remove('hidden'); document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=()=>{state.activeProfileId=b.dataset.modalSwitchProfile; save(); closeModal();}); document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();}; }
 
 function openCheckinModal(){ const p=profile(), cycle=currentCycleNumber(p); const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Check-in</p><h2>Ciclo ${cycle}</h2><p class="muted">Tente usar sempre a mesma luz, pose e distância.</p></div><button class="close" data-close>×</button></div><div class="form-grid">${inputPlain('checkWeight','Peso do dia')} ${inputPlain('checkWaist','Cintura')}<div class="field" style="grid-column:1/-1"><label>Observação do ciclo</label><textarea id="checkNotes"></textarea></div></div><div class="photo-grid"><label class="photo-box"><span>Frente<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="front" hidden></label><label class="photo-box"><span>Lado<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="side" hidden></label><label class="photo-box"><span>Costas<br><small>toque para enviar</small></span><input type="file" accept="image/*" data-photo="back" hidden></label></div><div class="actions"><button class="btn" data-save-checkin>Salvar check-in</button><button class="btn secondary" data-close>Cancelar</button></div></div>`; layer.classList.remove('hidden'); const photos={}; document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelectorAll('[data-photo]').forEach(inp=>inp.onchange=async()=>{ const img=await compressImage(inp.files[0]); photos[inp.dataset.photo]=img; inp.parentElement.innerHTML=`<img src="${img}" alt="foto ${inp.dataset.photo}">`; }); document.querySelector('[data-save-checkin]').onclick=()=>{ p.checkins.push({id:'c_'+Date.now(), date:nowISO(), cycle, weight:byId('checkWeight').value, waist:byId('checkWaist').value, notes:byId('checkNotes').value, photos}); save(); closeModal(); toast('Check-in salvo.'); }; }
 function inputPlain(id,label){ return `<div class="field"><label>${label}</label><input class="input" id="${id}"></div>`; }
