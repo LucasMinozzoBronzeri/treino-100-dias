@@ -335,11 +335,15 @@ function isOffline(){ return !navigator.onLine; }
 function canUseOnlineAI(){ return !!(AI_BACKEND_URL && !isOffline() && cloudUser); }
 function shouldShowOnboarding(){
   if(state.pendingEmailVerification && !cloudUser) return true;
-  // Conta real nunca deve entrar no app sem sessão confirmada.
-  // Se o navegador ficou com localStorage antigo, volta para o login.
-  if(state.entryMode === 'account' && !hasCloudAccount()) return true;
+
+  // Se o usuário já passou pelo onboarding e tem dados salvos neste aparelho,
+  // não mostra a tela de login enquanto o Supabase ainda está restaurando a sessão.
+  // Isso evita o "flash" de login toda vez que o PWA abre.
+  if(state.onboardingDone && state.entryMode === 'account') return false;
+
   // Modo local continua funcionando sem conta.
   if(state.entryMode === 'local' && state.onboardingDone) return false;
+
   return !state.onboardingDone && !cloudUser;
 }
 function onlineNoticeHTML(){
@@ -1223,7 +1227,7 @@ async function refreshLocalOrCloudStatus(){
     await loadLatestDietPlanFromCloud().catch(()=>{});
   }
   render();
-  toast(cloudUser ? (isLocalMode()?'Modo local com IA pronto.':'Conta conectada.') : 'Sem sessão online ativa.');
+  toast(cloudUser ? (isLocalMode()?'Modo local com IA pronto.':'Conta conectada.') : (state.entryMode==='account'?'Dados locais carregados. Entre novamente se a nuvem não conectar.':'Sem sessão online ativa.'));
 }
 
 async function cloudLogin(){
