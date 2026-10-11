@@ -293,6 +293,117 @@ function workoutById(p,id){ return p.workouts.find(w=>w.id===id); }
 function currentWorkout(p=profile()){ return workoutById(p, p.queue[0]); }
 function allExercises(p=profile()){ return p.workouts.flatMap(w=>w.exercises.map(e=>({...e, workoutId:w.id, workoutName:w.name}))); }
 
+function dateKey(d=new Date()){
+  const x = d instanceof Date ? d : new Date(d);
+  return x.toISOString().slice(0,10);
+}
+function startOfWeek(d=new Date()){
+  const x=new Date(d);
+  const day=(x.getDay()+6)%7; // segunda = 0
+  x.setHours(0,0,0,0);
+  x.setDate(x.getDate()-day);
+  return x;
+}
+function workoutsThisWeek(p=profile()){
+  const start=startOfWeek();
+  return (p.history||[]).filter(h=>new Date(h.date||0) >= start).length;
+}
+function workoutDoneToday(p=profile()){
+  const today=dateKey();
+  return (p.history||[]).some(h=>dateKey(h.date||0)===today);
+}
+function latestWorkoutToday(p=profile()){
+  const today=dateKey();
+  return [...(p.history||[])].reverse().find(h=>dateKey(h.date||0)===today) || null;
+}
+function checkinDoneToday(p=profile()){
+  const today=dateKey();
+  return (p.checkins||[]).some(c=>dateKey(c.date||0)===today);
+}
+function dailyScore(p=profile()){
+  const hasPlan=hasWorkoutPlan(p);
+  const train=workoutDoneToday(p);
+  const check=checkinDoneToday(p);
+  const hasDiet=!!p.dietPlan;
+  let score=0;
+  if(train) score+=55;
+  if(check) score+=20;
+  if(hasDiet) score+=15;
+  if(hasPlan) score+=10;
+  return Math.min(100,score);
+}
+function dietMeals(diet){
+  if(!diet) return [];
+  const src = diet.plan || diet.data || diet;
+  const raw = Array.isArray(src?.meals) ? src.meals : Array.isArray(src?.refeicoes) ? src.refeicoes : Array.isArray(src) ? src : [];
+  return raw.map((m,i)=>{
+    if(typeof m === 'string') return {time:'', title:`Refeição ${i+1}`, text:m};
+    return {
+      time:m.time || m.horario || m.hour || '',
+      title:m.title || m.name || m.refeicao || m.meal || `Refeição ${i+1}`,
+      text:m.text || m.description || m.descricao || m.alimentos || m.foods || ''
+    };
+  });
+}
+function nextDietMeal(p=profile()){
+  const meals=dietMeals(p.dietPlan);
+  if(!meals.length) return null;
+  const now=new Date();
+  const minutes=now.getHours()*60+now.getMinutes();
+  const parsed=meals.map((m,i)=>{
+    const mt=String(m.time||'').match(/(\d{1,2})[:h](\d{2})?/i);
+    if(!mt) return {...m, order:i, mins:null};
+    return {...m, order:i, mins:(Number(mt[1])||0)*60+(Number(mt[2])||0)};
+  });
+  return parsed.find(m=>m.mins!==null && m.mins>=minutes) || parsed[0];
+}
+function todayMissionHTML(p=profile()){
+  const hasPlan=hasWorkoutPlan(p);
+  const w=hasPlan ? currentWorkout(p) : null;
+  const done=workoutDoneToday(p);
+  const todayRecord=latestWorkoutToday(p);
+  const weekDone=workoutsThisWeek(p);
+  const weekTarget=clampTrainingDays(p.daysPerWeek);
+  const weekPct=Math.min(100,Math.round((weekDone/Math.max(1,weekTarget))*100));
+  const score=dailyScore(p);
+  const meal=nextDietMeal(p);
+  const levelInfo=levelFromXp(ensureGamification(p).xp);
+  const missionTitle=done ? 'Missão do dia cumprida' : hasPlan ? 'Missão de hoje' : 'Monte sua missão';
+  const missionText=done
+    ? `Treino ${todayRecord?.workoutId || ''} finalizado hoje. Mantém o ritmo, Warrior.`
+    : hasPlan ? `Próximo treino: ${w.id} — ${w.name}.`
+    : 'Gere um treino específico para começar sua jornada.';
+  return `<section class="today-hero">
+    <div class="today-main">
+      <p class="eyebrow">Hoje</p>
+      <h2>${esc(missionTitle)}</h2>
+      <p>${esc(missionText)}</p>
+      <div class="today-actions">${done?'<button class="btn secondary" data-screen-go="progress">Ver progresso</button>':hasPlan?`<button class="btn" data-action="start-current">Iniciar ${w.id}</button>`:`<button class="btn" data-action="generate-initial-plan">Gerar treino</button>`}<button class="btn secondary" data-action="open-levels">Nv. ${levelInfo.roman}</button></div>
+    </div>
+    <div class="today-score">
+      <div class="progress-ring small-ring" style="--p:${score}%"><div class="progress-ring-inner">${score}<small>score</small></div></div>
+      <span>${esc(levelInfo.rank.name)}</span>
+    </div>
+  </section>
+  <section class="today-grid">
+    <div class="today-card ${done?'done':''}">
+      <div><strong>${done?'Treino feito':'Treino'}</strong><span>${hasPlan?esc(done ? (todayRecord?.workoutName||'Finalizado') : `${w.id} — ${w.name}`):'Sem plano ativo'}</span></div>
+      <b>${done?'✓':'🏋️'}</b>
+    </div>
+    <div class="today-card">
+      <div><strong>Semana</strong><span>${weekDone}/${weekTarget} treinos</span></div>
+      <b>${weekPct}%</b>
+    </div>
+    <div class="today-card ${checkinDoneToday(p)?'done':''}">
+      <div><strong>Check-in</strong><span>${checkinDoneToday(p)?'feito hoje':'opcional hoje'}</span></div>
+      <b>${checkinDoneToday(p)?'✓':'📸'}</b>
+    </div>
+    <div class="today-card">
+      <div><strong>Nutri</strong><span>${meal ? esc((meal.time?meal.time+' • ':'')+meal.title) : 'sem rotina ainda'}</span></div>
+      <b>🥗</b>
+    </div>
+  </section>`;
+}
 const RANKS = [
   {from:1,to:2,name:'Frango Recém-Matriculado',icon:'🐣',desc:'Começou agora, mas já saiu da promessa.'},
   {from:3,to:5,name:'Frango Esforçado',icon:'🐥',desc:'Ainda é começo, mas já tem constância.'},
@@ -1168,25 +1279,14 @@ function renderHome(){
   const p = profile();
   const hasPlan = hasWorkoutPlan(p);
   const w = hasPlan ? currentWorkout(p) : null;
-  const pct = p.target ? Math.min(100, Math.round(p.progress/p.target*100)) : 0;
   const cycles = currentCycleNumber(p);
   const planSource = p.planMeta?.source || 'pending';
   const planBadge = planSource==='ai' ? 'IA' : planSource==='default' ? 'Padrão' : 'Pendente';
   const planBadgeClass = planSource==='ai' ? 'green' : planSource==='default' ? 'orange' : 'yellow';
   return `
+    ${todayMissionHTML(p)}
     ${levelHeaderHTML(p)}
-    <section class="hero">
-      <div class="hero-row">
-        <div>
-          <p class="eyebrow">Perfil ativo</p>
-          <h2>${esc(p.name || 'Meu perfil')}</h2>
-          <p>${esc(p.goal || 'Seu projeto de evolução na academia.')}</p>
-          <div class="actions">${hasPlan?`<button class="btn" data-action="start-current">Iniciar ${w.id}</button>`:`<button class="btn" data-action="generate-initial-plan">Gerar treino específico</button>`}<button class="btn secondary" data-screen-go="progress">Ver progresso</button></div>
-        </div>
-        <div class="progress-ring" style="--p:${pct}%"><div class="progress-ring-inner">${p.progress}/${p.target}<small>${pct}%</small></div></div>
-      </div>
-    </section>
-    <section class="card plan-card">
+    <section class="card plan-card compact-plan">
       <div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title || 'Aguardando treino inteligente')} • ${esc(p.programLabel || programLabelForProfile(p))} • Ciclo ${p.planMeta?.cycle || Math.max(1, cycles+1)}</p></div><span class="badge ${planBadgeClass}">${planBadge}</span></div>
       <p class="muted">${esc(p.planMeta?.notes || (hasPlan ? 'Use os dados dos treinos para ajustar o próximo ciclo.' : 'Nenhum treino foi carregado ainda. Gere um treino específico com IA ou use o treino padrão.'))}</p>
       ${renderPlanActions(p)}
@@ -1204,9 +1304,11 @@ function renderHome(){
       <div class="stat"><strong>${p.checkins.length}</strong><span>check-ins salvos</span></div>
     </section>
     ${hasPlan ? `<section class="card">
-      <div class="card-title"><h3>Fila atual</h3><p>Somente o primeiro pode ser concluído</p></div>
+      <div class="card-title"><h3>Fila atual</h3><p>Somente o primeiro treino da fila pode ser concluído</p></div>
       <div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div>
-    </section>` : ''}`;
+    </section>` : ''}
+    ${p.history.length ? `<section class="card"><div class="card-title"><h3>Último treino</h3></div>${historyRowHTML(p.history[p.history.length-1])}</section>` : ''}
+  `;
 }
 function pendingHTML(p){ return ''; }
 function workoutQueueCard(p,id,current=false){ const w=workoutById(p,id); if(!w) return ''; return `<div class="workout-card ${current?'current':''}" data-open-workout="${id}"><div class="workout-left"><div class="letter">${id}</div><div class="workout-name"><strong>${esc(w.name)}</strong><span>${current?'Liberado para concluir':'Modo consulta'} • ${w.exercises.length} exercícios</span></div></div><span class="badge ${current?'orange':''}">${current?'Atual':'Bloqueado'}</span></div>`; }
