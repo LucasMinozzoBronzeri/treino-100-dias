@@ -309,3 +309,24 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
   .small-ring{width:86px;height:86px}
   .today-main h2{font-size:27px}
 }
+
+/* v6.3.1 — Rodapé de versão */
+.app-footer{
+  margin:10px 0 4px;
+  padding:14px 6px calc(8px + env(safe-area-inset-bottom));
+  color:var(--muted);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  flex-wrap:wrap;
+  font-size:12px;
+  text-align:center;
+}
+.app-footer strong{
+  color:var(--orange2);
+  border:1px solid rgba(255,122,0,.25);
+  background:rgba(255,122,0,.08);
+  border-radius:999px;
+  padding:4px 8px;
+}

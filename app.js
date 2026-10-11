@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
+const APP_VERSION = '6.3.1';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -334,14 +335,30 @@ function dailyScore(p=profile()){
 }
 function dietMeals(diet){
   if(!diet) return [];
-  const src = diet.plan || diet.data || diet;
-  const raw = Array.isArray(src?.meals) ? src.meals : Array.isArray(src?.refeicoes) ? src.refeicoes : Array.isArray(src) ? src : [];
+  const candidates = [
+    diet.mealSchedule,
+    diet.routine,
+    diet.meals,
+    diet.refeicoes,
+    diet.plan?.mealSchedule,
+    diet.plan?.routine,
+    diet.plan?.meals,
+    diet.plan?.refeicoes,
+    diet.data?.mealSchedule,
+    diet.data?.routine,
+    diet.data?.meals,
+    diet.data?.refeicoes
+  ];
+  const raw = candidates.find(Array.isArray) || (Array.isArray(diet) ? diet : []);
   return raw.map((m,i)=>{
     if(typeof m === 'string') return {time:'', title:`Refeição ${i+1}`, text:m};
+    const foods = Array.isArray(m.foods) ? m.foods.join(' • ') : Array.isArray(m.alimentos) ? m.alimentos.join(' • ') : (m.foods || m.alimentos || m.description || m.descricao || m.text || '');
     return {
-      time:m.time || m.horario || m.hour || '',
-      title:m.title || m.name || m.refeicao || m.meal || `Refeição ${i+1}`,
-      text:m.text || m.description || m.descricao || m.alimentos || m.foods || ''
+      time:m.timeWindow || m.time || m.horario || m.hour || '',
+      title:m.meal || m.title || m.name || m.refeicao || m.mealName || `Refeição ${i+1}`,
+      text:foods,
+      portions:m.portions || m.porcoes || '',
+      notes:m.notes || m.observacoes || ''
     };
   });
 }
@@ -399,8 +416,8 @@ function todayMissionHTML(p=profile()){
       <b>${checkinDoneToday(p)?'✓':'📸'}</b>
     </div>
     <div class="today-card">
-      <div><strong>Nutri</strong><span>${meal ? esc((meal.time?meal.time+' • ':'')+meal.title) : 'sem rotina ainda'}</span></div>
-      <b>🥗</b>
+      <div><strong>Nutri</strong><span>${meal ? esc((meal.time?meal.time+' • ':'')+meal.title) : (p.dietPlan ? 'rotina salva' : 'sem rotina ainda')}</span></div>
+      <b>${p.dietPlan?'🥗':'+'}</b>
     </div>
   </section>`;
 }
@@ -740,6 +757,10 @@ function shouldShowOnboarding(){
 
   return !state.onboardingDone && !cloudUser;
 }
+function appFooterHTML(){
+  const year=new Date().getFullYear();
+  return `<footer class="app-footer"><span>© ${year} Gym Bronze. Todos os direitos reservados.</span><strong>v${APP_VERSION}</strong></footer>`;
+}
 function onlineNoticeHTML(){
   if(isOffline()) return '<section class="offline-banner"><b>Modo offline</b><span>Você pode treinar normalmente, mas nuvem e IA ficam pausadas. Quando a internet voltar, use Sincronizar histórico.</span></section>';
   return '';
@@ -794,7 +815,7 @@ function render(){
     byId('profileInitial').textContent = '+';
     updateLevelHeader();
     document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-    byId('content').innerHTML = onlineNoticeHTML() + renderOnboarding();
+    byId('content').innerHTML = onlineNoticeHTML() + renderOnboarding() + appFooterHTML();
     bindOnboarding();
     return;
   }
@@ -805,7 +826,7 @@ function render(){
   updateLevelHeader();
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.screen===screen));
   const map = {home:renderHome, workouts:renderWorkouts, progress:renderProgress, checkin:renderCheckin, coach:renderCoach, profile:renderProfile};
-  byId('content').innerHTML = onlineNoticeHTML() + map[screen]();
+  byId('content').innerHTML = onlineNoticeHTML() + map[screen]() + appFooterHTML();
   bindScreen();
 }
 
@@ -1344,9 +1365,9 @@ function renderCheckin(){
 
 function renderDietPlanHTML(diet){
   if(!diet) return '<div class="empty">Nenhuma rotina alimentar gerada ainda.</div>';
-  const schedule = Array.isArray(diet.mealSchedule) ? diet.mealSchedule : Array.isArray(diet.routine) ? diet.routine : [];
-  const scheduleHTML = schedule.length ? `<div class="meal-timeline">${schedule.map(m=>`<div class="meal-item"><div class="meal-time">${esc(m.timeWindow || m.time || '')}</div><div><strong>${esc(m.meal || m.title || 'Refeição')}</strong><p>${esc(m.foods || m.description || '')}</p>${m.portions?`<span>${esc(m.portions)}</span>`:''}${m.notes?`<em>${esc(m.notes)}</em>`:''}</div></div>`).join('')}</div>` : '';
-  return `<div class="ai-report diet-report"><strong>${esc(diet.title||'Rotina alimentar')}</strong><p>${esc(diet.summary||'')}</p>${diet.guidelines?`<p><b>Diretrizes:</b> ${esc(Array.isArray(diet.guidelines)?diet.guidelines.join(' • '):diet.guidelines)}</p>`:''}${scheduleHTML}${diet.shoppingList?`<p><b>Base de compras:</b> ${esc(Array.isArray(diet.shoppingList)?diet.shoppingList.join(' • '):diet.shoppingList)}</p>`:''}${diet.attention?`<p><b>Atenção:</b> ${esc(diet.attention)}</p>`:''}</div>`;
+  const schedule = dietMeals(diet);
+  const scheduleHTML = schedule.length ? `<div class="meal-timeline">${schedule.map(m=>`<div class="meal-item"><div class="meal-time">${esc(m.time || '')}</div><div><strong>${esc(m.title || 'Refeição')}</strong><p>${esc(m.text || '')}</p>${m.portions?`<span>${esc(m.portions)}</span>`:''}${m.notes?`<em>${esc(m.notes)}</em>`:''}</div></div>`).join('')}</div>` : '';
+  return `<div class="ai-report diet-report"><strong>${esc(diet.title||'Rotina alimentar')}</strong><p>${esc(diet.summary||'')}</p>${diet.guidelines?`<p><b>Diretrizes:</b> ${esc(Array.isArray(diet.guidelines)?diet.guidelines.join(' • '):diet.guidelines)}</p>`:''}${scheduleHTML || '<p class="muted">Rotina alimentar salva, mas sem horários estruturados detectados.</p>'}${diet.shoppingList?`<p><b>Base de compras:</b> ${esc(Array.isArray(diet.shoppingList)?diet.shoppingList.join(' • '):diet.shoppingList)}</p>`:''}${diet.attention?`<p><b>Atenção:</b> ${esc(diet.attention)}</p>`:''}</div>`;
 }
 function renderCoach(){
   const p=profile(); const insights=generateInsights(p); const aiOn=canUseOnlineAI(); const reports=p.history.filter(h=>h.aiReport || h.aiReportStatus || h.aiReportError).slice(-5).reverse();
@@ -2367,7 +2388,7 @@ async function saveDietPlanToCloud(diet, opts={}){
   const user=await getCurrentCloudUser();
   if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
   try{
-    await upsertCloudProfile(profile().name || 'Usuário');
+    await upsertCloudProfile(null);
     const payload = {...diet, savedFromApp:true, savedAt:nowISO()};
     const row = {
       user_id:user.id,
