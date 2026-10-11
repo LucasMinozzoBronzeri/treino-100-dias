@@ -2,6 +2,7 @@ const STORAGE_KEY = 'gymBronze.v579';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
+const DELETE_ACCOUNT_ENDPOINT_PATH = '/api/delete-account';
 const AI_BACKEND_URL = 'https://treino-100-api.vercel.app';
 const AI_REQUIRES_LOGIN = true;
 const SUPABASE_URL = 'https://ppmlzpyxqtsgyhsyiuuh.supabase.co';
@@ -1337,7 +1338,7 @@ function renderProfile(){
     <section class="card legal-card"><div class="card-title"><div><h3>Termos e avisos</h3><p>Transparência para uso público.</p></div><span class="badge yellow">Beta</span></div><div class="legal-text"><p>O Gym Bronze é uma ferramenta de organização, treino e análise. Ele não substitui personal trainer, nutricionista, médico ou fisioterapeuta.</p><p>As sugestões de treino e alimentação são educativas. Interrompa o exercício em caso de dor forte, tontura, falta de ar incomum ou desconforto relevante.</p><p>Dados como idade, peso, altura, objetivo, observações, treinos e relatórios podem ser enviados para serviços externos de IA quando você usa recursos inteligentes.</p></div></section>
   </details>
 
-  <section class="card danger-zone"><div class="card-title"><div><h3>Zona de segurança</h3><p>Ações de saída e limpeza ficam aqui embaixo.</p></div></div><div class="actions">${hasCloudAccount()?'<button class="btn secondary danger-soft" data-action="cloud-logout">Sair e limpar este aparelho</button>': isLocalMode()?'<button class="btn secondary danger-soft" data-action="local-logout">Limpar app local</button>':''}<button class="btn danger" data-action="reset-profile">Resetar perfil ativo</button></div></section>`;
+  <section class="card danger-zone"><div class="card-title"><div><h3>Zona de segurança</h3><p>Ações de saída, limpeza e exclusão ficam aqui.</p></div></div><div class="actions">${hasCloudAccount()?'<button class="btn secondary danger-soft" data-action="cloud-logout">Sair e limpar este aparelho</button><button class="btn danger" data-action="delete-account">Excluir conta</button>': isLocalMode()?'<button class="btn secondary danger-soft" data-action="local-logout">Sair e apagar perfil local</button>':''}<button class="btn danger" data-action="reset-profile">Resetar perfil ativo</button></div><p class="muted">Sair limpa apenas este aparelho. Excluir conta tenta apagar também os dados da nuvem.</p></section>`;
 }
 
 function renderCloudAccount(p){
@@ -1376,6 +1377,7 @@ function handleAction(a){
   if(a==='cloud-signup') cloudSignup();
   if(a==='cloud-logout') cloudLogout();
   if(a==='local-logout') localLogoutWarning();
+  if(a==='delete-account') deleteAccountFlow();
   if(a==='save-diet-cloud') saveDietPlanToCloud(profile().dietPlan, {silent:false}).then(()=>render());
   if(a==='load-diet-cloud') loadLatestDietPlanFromCloud().then(r=>{ render(); toast(r?.loaded?'Rotina alimentar carregada da nuvem.':'Nenhuma rotina nova encontrada na nuvem.'); });
   if(a==='cloud-sync') syncLocalHistoryToCloud();
@@ -1758,22 +1760,72 @@ async function hardResetLocalAppState(){
   onboardingView = 'login';
   cloudUser = null;
 }
-async function localLogoutWarning(){
+async function deleteActiveLocalProfile(){
   const p=profile();
-  const hasLocalData = (p.history&&p.history.length) || (p.workouts&&p.workouts.length) || p.dietPlan || (p.checkins&&p.checkins.length) || (p.bio&&p.bio.length);
-  const msg = hasLocalData
-    ? 'Você está no modo local. Se limpar agora, os dados deste aparelho podem ser perdidos.\n\nPara salvar na nuvem, cancele, crie uma conta, confirme o e-mail, entre na conta e clique em “Sair e limpar app”.\n\nDeseja limpar mesmo assim?'
-    : 'Limpar este perfil local e voltar para a tela inicial?';
-  if(!confirm(msg)) return;
-  await clearAppRuntimeCache();
-  await hardResetLocalAppState();
+  if(!p) return;
+  const label=p.name || 'perfil local';
+  if(!confirm(`Sair e apagar o perfil local "${label}" deste aparelho?\n\nIsso apaga treinos, nutri, XP, check-ins e dados locais desse perfil. Como ele não está na nuvem, não terá como recuperar.`)) return;
+  const t=prompt('Digite APAGAR para confirmar:');
+  if(t !== 'APAGAR') return toast('Exclusão cancelada.');
+  const idx=state.profiles.findIndex(x=>x.id===p.id);
+  if(idx>=0) state.profiles.splice(idx,1);
+  state.activeProfileId=state.profiles[0]?.id || null;
+  if(!state.activeProfileId){
+    state.onboardingDone=false;
+    state.entryMode=null;
+    onboardingView='login';
+    screen='home';
+    try{ if(supabaseClient) await supabaseClient.auth.signOut(); }catch(e){}
+    cloudUser=null;
+  }
   save();
-  toast('Modo local limpo.');
   render();
+  toast('Perfil local apagado deste aparelho.');
+}
+async function deleteAccountFlow(){
+  if(isLocalMode() || !hasCloudAccount()) return deleteActiveLocalProfile();
+  const p=profile();
+  const email=cloudUser?.email || p.accountEmail || '';
+  const ok=confirm(`Excluir permanentemente esta conta?\n\nConta: ${email}\n\nIsso tenta apagar seus dados da nuvem e remover o login desta conta. Esta ação não é o mesmo que sair do aparelho e não deve ser usada só para limpar cache.`);
+  if(!ok) return;
+  const t=prompt('Digite EXCLUIR CONTA para confirmar:');
+  if(t !== 'EXCLUIR CONTA') return toast('Exclusão cancelada.');
+  const accessToken=await getCloudAccessToken();
+  if(!accessToken) return toast('Sessão expirada. Entre novamente para excluir a conta.');
+  try{
+    const base=String(AI_BACKEND_URL||'').trim().replace(/\/+$/,'');
+    const response=await fetch(base + DELETE_ACCOUNT_ENDPOINT_PATH, {
+      method:'POST',
+      headers:{'Content-Type':'application/json', 'Authorization':`Bearer ${accessToken}`},
+      body:JSON.stringify({confirm:'EXCLUIR CONTA'})
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(data.error || `Erro HTTP ${response.status}`);
+    const deletedUserId=cloudUser?.id;
+    try{ await supabaseClient.auth.signOut(); }catch(e){}
+    state.profiles=(state.profiles||[]).filter(x=>x.cloudUserId !== deletedUserId && x.accountEmail !== email);
+    state.activeProfileId=state.profiles[0]?.id || null;
+    if(!state.activeProfileId){
+      state.onboardingDone=false;
+      state.entryMode=null;
+      onboardingView='login';
+      screen='home';
+    }
+    cloudUser=null;
+    save();
+    await clearAppRuntimeCache();
+    render();
+    toast('Conta excluída e dados locais limpos.');
+  }catch(e){
+    toast('Não consegui excluir a conta: '+(e.message||'erro'));
+  }
+}
+async function localLogoutWarning(){
+  return deleteActiveLocalProfile();
 }
 async function cloudLogout(){
   if(!supabaseClient) return;
-  const ok = confirm('Sair da conta e limpar os dados/cache locais deste aparelho?\n\nAntes de sair, o Gym Bronze vai tentar sincronizar perfil, treinos, plano atual e rotina alimentar na nuvem. Depois disso, este aparelho volta para a tela inicial.');
+  const ok = confirm('Sair da conta neste aparelho e limpar o cache local?\n\nIsso NÃO exclui sua conta na nuvem. O Gym Bronze vai tentar sincronizar seus dados antes de sair e depois este aparelho volta para a tela inicial.');
   if(!ok) return;
   toast('Sincronizando dados antes de sair...');
   await syncCurrentDataBeforeLogout();
