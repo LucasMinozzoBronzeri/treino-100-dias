@@ -963,3 +963,41 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
     height:38px;
   }
 }
+
+/* v7.1 — Login Google */
+.btn.google{
+  background:rgba(255,255,255,.94);
+  color:#171717;
+  border-color:rgba(255,255,255,.75);
+  justify-content:center;
+}
+.btn.google span{
+  width:22px;
+  height:22px;
+  border-radius:50%;
+  display:inline-grid;
+  place-items:center;
+  margin-right:6px;
+  font-weight:1000;
+  color:#4285F4;
+  background:#fff;
+  box-shadow:0 0 0 1px rgba(0,0,0,.08);
+}
+.auth-separator{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin:12px 0 2px;
+  color:var(--muted);
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  font-weight:800;
+}
+.auth-separator:before,
+.auth-separator:after{
+  content:"";
+  height:1px;
+  flex:1;
+  background:rgba(255,255,255,.10);
+}

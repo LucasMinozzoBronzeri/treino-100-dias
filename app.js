@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.0.4';
+const APP_VERSION = '7.1.0';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -232,7 +232,7 @@ let activeModalWorkout = null;
 let onboardingView = 'login';
 
 function defaultState(){
-  return { activeProfileId: null, profiles: [], version: 4, onboardingDone: false, entryMode: null, pendingEmailVerification: null };
+  return { activeProfileId: null, profiles: [], version: 5, onboardingDone: false, entryMode: null, pendingEmailVerification: null, pendingProfileCompletion: null };
 }
 function newProfile(name='Novo perfil'){
   const p = {
@@ -260,7 +260,8 @@ function migrateState(s){
   if(typeof s.onboardingDone !== 'boolean') s.onboardingDone = s.profiles.some(hasMeaningfulProfileData);
   if(!('entryMode' in s)) s.entryMode = s.onboardingDone ? 'local' : null;
   if(!('pendingEmailVerification' in s)) s.pendingEmailVerification = null;
-  if(!s.version || s.version < 4) s.version = 4;
+  if(!('pendingProfileCompletion' in s)) s.pendingProfileCompletion = null;
+  if(!s.version || s.version < 5) s.version = 5;
   return s;
 }
 function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -1182,6 +1183,7 @@ function canUseOnlineAI(){ return !!(AI_BACKEND_URL && !isOffline() && cloudUser
 function shouldShowOnboarding(){
   if(!state.profiles || !state.profiles.length || !state.activeProfileId) return true;
   if(state.pendingEmailVerification && !cloudUser) return true;
+  if(state.pendingProfileCompletion) return true;
 
   // Se o usuário já passou pelo onboarding e tem dados salvos neste aparelho,
   // não mostra a tela de login enquanto o Supabase ainda está restaurando a sessão.
@@ -1284,6 +1286,7 @@ function render(){
 }
 
 function renderOnboarding(){
+  if(state.pendingProfileCompletion) return renderGoogleCompleteOnboarding();
   if(state.pendingEmailVerification && !cloudUser && onboardingView !== 'login' && onboardingView !== 'local') return renderVerifyEmailOnboarding();
   if(onboardingView === 'signup') return renderSignupOnboarding();
   if(onboardingView === 'local') return renderLocalOnboarding();
@@ -1302,7 +1305,8 @@ function renderOnboarding(){
         <div class="field"><label>E-mail</label><input class="input" id="loginEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div>
         <div class="field"><label>Senha</label><input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="sua senha"></div>
       </div>
-      <div class="actions"><button class="btn full" data-onboarding="login">Entrar</button></div>
+      <div class="actions"><button class="btn full" data-onboarding="login">Entrar</button><button class="btn google full" data-onboarding="google-login" type="button"><span>G</span> Entrar com Google</button></div>
+      <div class="auth-separator"><span>ou</span></div>
       <div class="auth-links">
         <button type="button" data-onboarding="show-signup">Criar conta</button>
         <span>•</span>
@@ -1310,6 +1314,19 @@ function renderOnboarding(){
       </div>
     </div>
   </section>`;
+}
+function renderGoogleCompleteOnboarding(){
+  const p=profile() || {};
+  const name=p.name || state.pendingProfileCompletion?.name || '';
+  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Login Google</p><h2>Complete seu perfil</h2><p>Você já entrou com Google. Agora preencha seus dados para o Gym Bronze gerar seu primeiro treino específico.</p></div></section>
+  <section class="auth-center"><div class="card auth-card wide">
+    <div class="card-title"><div><h3>Perfil de treino</h3><p>Esses dados personalizam treino, score e IA.</p></div><span class="badge green">Google conectado</span></div>
+    ${onboardingProfileFields('google')}
+    <label class="legal-check"><input type="checkbox" id="googleAcceptTerms"> <span>Li e aceito os Termos, a Política de Privacidade e entendo que o Gym Bronze não substitui profissionais de saúde, nutrição ou educação física.</span></label>
+    <p class="form-error hidden" id="googleError"></p>
+    <div class="actions"><button class="btn full" data-onboarding="google-complete">Salvar perfil e gerar treino</button><button class="btn secondary full" data-onboarding="google-logout">Sair desta conta Google</button></div>
+    <p class="muted">Conta: ${esc(state.pendingProfileCompletion?.email || p.accountEmail || '')}</p>
+  </div></section>`;
 }
 function renderVerifyEmailOnboarding(){
   const email = state.pendingEmailVerification?.email || '';
@@ -1369,12 +1386,20 @@ function onboardingProfileFields(prefix){
 }
 function bindOnboarding(){
   document.querySelectorAll('[data-onboarding]').forEach(btn=>btn.onclick=()=>handleOnboarding(btn.dataset.onboarding));
+  if(state.pendingProfileCompletion){
+    const p=profile() || {};
+    const map={Name:p.name||state.pendingProfileCompletion.name||'', Age:p.age||'', Sex:p.sex||'', Height:p.height||'', Weight:p.weight||'', Goal:p.goal||'', Focus:p.focus||'', Experience:p.experience||'Iniciante', Days:p.daysPerWeek||'5', Notes:p.notes||''};
+    Object.entries(map).forEach(([k,v])=>{ const el=byId('google'+k); if(el && !el.value) el.value=v; });
+  }
 }
 function handleOnboarding(action){
   if(action==='show-signup'){ onboardingView='signup'; render(); return; }
   if(action==='show-local'){ onboardingView='local'; render(); return; }
   if(action==='show-login'){ onboardingView='login'; render(); return; }
   if(action==='login') return onboardingLogin();
+  if(action==='google-login') return onboardingGoogleLogin();
+  if(action==='google-complete') return onboardingGoogleComplete();
+  if(action==='google-logout') return googleCompletionLogout();
   if(action==='signup') return onboardingSignup();
   if(action==='local') return onboardingLocal();
   if(action==='verify-login') return verifyEmailLoginNow();
@@ -1431,6 +1456,74 @@ function normalizeProfileInfoFromUser(user){
     daysPerWeek: String(meta.daysPerWeek || meta.days_per_week || 5),
     notes: meta.notes || ''
   };
+}
+function profileInfoLooksComplete(info){
+  if(!info) return false;
+  return !validateProfileInfo({
+    name:info.name || '',
+    age:info.age || '',
+    sex:info.sex || '',
+    height:info.height || '',
+    weight:info.weight || '',
+    goal:info.goal || '',
+    focus:info.focus || '',
+    experience:info.experience || 'Iniciante',
+    daysPerWeek:info.daysPerWeek || '5',
+    notes:info.notes || ''
+  });
+}
+function currentProfileLooksComplete(p=profile()){
+  if(!p) return false;
+  return profileInfoLooksComplete({
+    name:p.name, age:p.age, sex:p.sex, height:p.height, weight:p.weight,
+    goal:p.goal, focus:p.focus, experience:p.experience, daysPerWeek:p.daysPerWeek, notes:p.notes
+  });
+}
+async function onboardingGoogleLogin(){
+  if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
+  if(isOffline()) return toast('Você está offline. Entre com Google quando estiver online.');
+  const redirectTo = window.location.origin + window.location.pathname;
+  const { error } = await supabaseClient.auth.signInWithOAuth({
+    provider:'google',
+    options:{ redirectTo, queryParams:{ prompt:'select_account' } }
+  });
+  if(error) return toast('Erro ao abrir Google: '+friendlyAuthError(error));
+}
+async function onboardingGoogleComplete(){
+  if(!cloudUser || isAnonymousCloudUser()){
+    await refreshCloudUser(false);
+    if(!cloudUser || isAnonymousCloudUser()) return showFormError('googleError','Sessão Google não encontrada. Entre com Google novamente.');
+  }
+  const info=readOnboardingProfile('google');
+  const msg=validateProfileInfo(info);
+  if(msg) return showFormError('googleError', msg);
+  if(!byId('googleAcceptTerms')?.checked) return showFormError('googleError', 'Aceite os Termos e a Política de Privacidade para continuar.');
+  const p=prepareAccountProfile(cloudUser, info);
+  applyProfileInfo(info, p);
+  p.cloudUserId=cloudUser.id;
+  p.accountEmail=cloudUser.email || p.accountEmail || '';
+  markLegalAcceptance(p);
+  state.pendingProfileCompletion=null;
+  state.pendingEmailVerification=null;
+  state.onboardingDone=true;
+  state.entryMode='account';
+  screen='home';
+  save();
+  try{ await upsertCloudProfile(info.name, info); }catch(e){ console.warn('profile upsert failed', e); }
+  await generateInitialPlanFromAI({silent:false, force:true, fallbackDefault:true});
+  toast(profile().planMeta?.source==='ai' ? 'Perfil Google completo. Treino específico criado.' : 'Perfil Google completo. Apliquei treino padrão por fallback.');
+  render();
+}
+async function googleCompletionLogout(){
+  if(supabaseClient) await supabaseClient.auth.signOut().catch(()=>{});
+  cloudUser=null;
+  state.pendingProfileCompletion=null;
+  state.onboardingDone=false;
+  state.entryMode=null;
+  onboardingView='login';
+  save();
+  render();
+  toast('Conta Google desconectada.');
 }
 function setPendingEmailVerification(email, profileInfo=null, legalInfo=null){
   const current = state.pendingEmailVerification || {};
@@ -1499,11 +1592,27 @@ async function completeVerifiedAccountSession(){
   const signupInfo = pending.profileInfo || cloudInfo || normalizeProfileInfoFromUser(user);
   const accountProfile = prepareAccountProfile(user, signupInfo);
 
+  if(!profileInfoLooksComplete(signupInfo) && !currentProfileLooksComplete(accountProfile)){
+    state.pendingProfileCompletion={
+      provider:'google',
+      userId:user.id,
+      email:user.email || '',
+      name:signupInfo?.name || user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || ''
+    };
+    state.pendingEmailVerification=null;
+    state.onboardingDone=false;
+    state.entryMode='account';
+    onboardingView='google-complete';
+    save();
+    return false;
+  }
+
   if(pending.acceptedTermsAt) accountProfile.acceptedTermsAt = pending.acceptedTermsAt;
   if(pending.acceptedPrivacyAt) accountProfile.acceptedPrivacyAt = pending.acceptedPrivacyAt;
   markLegalAcceptance(accountProfile);
 
   state.pendingEmailVerification = null;
+  state.pendingProfileCompletion = null;
   state.onboardingDone = true;
   state.entryMode = 'account';
   save();
