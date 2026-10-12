@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.1.0';
+const APP_VERSION = '7.1.1';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -928,7 +928,7 @@ function awardWorkoutXP(p,w,record){
   const total=breakdown.reduce((sum,item)=>sum+item.xp,0);
   g.xp += total;
   const after=levelFromXp(g.xp);
-  const event={id:record.id, type:'workout', date:record.date, workoutId:record.workoutId, workoutName:record.workoutName, xp:total, breakdown, levelBefore:before.level, levelAfter:after.level};
+  const event={id:record.id, type:'workout', date:record.date, workoutId:record.workoutId, workoutName:record.workoutName, xp:total, breakdown, levelBefore:before.level, levelAfter:after.level, rankBefore:before.rank.name, rankAfter:after.rank.name, rankChanged:before.rank.name!==after.rank.name};
   g.xpEvents.push(event);
   if(g.xpEvents.length>300) g.xpEvents=g.xpEvents.slice(-300);
   g.lastLevelSeen=after.level;
@@ -1126,6 +1126,44 @@ function levelUpToast(xpInfo){
     return `+${xpInfo.total} XP. Subiu para Nv. ${xpInfo.after.roman} — ${xpInfo.after.rank.name}!`;
   }
   return `+${xpInfo.total} XP. Faltam ${xpInfo.after.toNext} XP para Nv. ${roman(xpInfo.after.level+1)}.`;
+}
+function rankChangedByXp(xpInfo){
+  return !!(xpInfo && xpInfo.before?.rank?.name && xpInfo.after?.rank?.name && xpInfo.before.rank.name !== xpInfo.after.rank.name);
+}
+function openRankUpModal(xpInfo){
+  if(!rankChangedByXp(xpInfo)) return false;
+  const before=xpInfo.before;
+  const after=xpInfo.after;
+  const layer=byId('modalLayer');
+  layer.innerHTML=`<div class="modal rank-up-modal">
+    <div class="rank-confetti" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="rank-up-hero">
+      <p class="eyebrow">Nova patente desbloqueada</p>
+      <div class="rank-up-icon">${esc(after.rank.icon)}</div>
+      <h2>${esc(after.rank.name)}</h2>
+      <p>${esc(after.rank.desc)}</p>
+    </div>
+    <div class="rank-up-change">
+      <span>${esc(before.rank.icon)} ${esc(before.rank.name)}</span>
+      <b>→</b>
+      <span>${esc(after.rank.icon)} ${esc(after.rank.name)}</span>
+    </div>
+    <div class="rank-up-stats">
+      <div><strong>+${xpInfo.total}</strong><span>XP no treino</span></div>
+      <div><strong>Nv. ${esc(after.roman)}</strong><span>${after.level}</span></div>
+      <div><strong>${after.toNext}</strong><span>XP p/ próximo nível</span></div>
+    </div>
+    <div class="actions center-actions"><button class="btn" data-rank-open-levels>Ver trilha</button><button class="btn secondary" data-close>Fechar</button></div>
+  </div>`;
+  layer.classList.remove('hidden');
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
+  const openBtn=document.querySelector('[data-rank-open-levels]');
+  if(openBtn) openBtn.onclick=()=>openLevelModal();
+  return true;
+}
+function maybeShowRankUpModal(xpInfo){
+  if(!rankChangedByXp(xpInfo)) return;
+  setTimeout(()=>openRankUpModal(xpInfo), 450);
 }
 
 
@@ -2316,6 +2354,8 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
   p.history.push(record);
   p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={}; p.tempTimes={}; p.activeWorkoutSession=null; p.activeWorkoutVariant=null; p.activeWorkoutAdjustment=null;
   save(); closeModal(); toast(record.aiReportStatus==='pending' ? levelUpToast(xpInfo)+' Gerando relatório com IA...' : (isOffline() ? levelUpToast(xpInfo)+' Salvo offline neste aparelho.' : levelUpToast(xpInfo)));
+  maybeShowRankUpModal(xpInfo);
+  saveCurrentPlanToCloud('queue_after_workout').catch(()=>{});
   if(record.aiReportStatus==='pending') generateWorkoutAIReport(p.id, record.id);
   else saveWorkoutToCloud(p, record, {silent:true});
 

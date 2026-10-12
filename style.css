@@ -1001,3 +1001,140 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
   flex:1;
   background:rgba(255,255,255,.10);
 }
+
+/* v7.1.1 — Popup de nova patente */
+.rank-up-modal{
+  position:relative;
+  overflow:hidden;
+  text-align:center;
+  border-color:rgba(245,158,11,.42);
+  box-shadow:0 28px 90px rgba(0,0,0,.62), 0 0 70px rgba(245,158,11,.16);
+  animation:rankPopIn .46s cubic-bezier(.2,1.4,.25,1) both;
+}
+.rank-up-modal:before{
+  content:"";
+  position:absolute;
+  inset:-30%;
+  background:radial-gradient(circle at 50% 10%, rgba(245,158,11,.32), transparent 34%), radial-gradient(circle at 20% 40%, rgba(255,255,255,.10), transparent 18%), radial-gradient(circle at 80% 38%, rgba(245,158,11,.16), transparent 20%);
+  pointer-events:none;
+}
+.rank-up-hero,
+.rank-up-change,
+.rank-up-stats,
+.rank-up-modal .actions{
+  position:relative;
+  z-index:2;
+}
+.rank-up-hero .eyebrow{
+  color:#fbbf24;
+}
+.rank-up-icon{
+  width:96px;
+  height:96px;
+  border-radius:32px;
+  margin:10px auto 14px;
+  display:grid;
+  place-items:center;
+  font-size:54px;
+  background:linear-gradient(135deg, rgba(245,158,11,.25), rgba(255,255,255,.08));
+  border:1px solid rgba(245,158,11,.42);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18), 0 18px 46px rgba(245,158,11,.18);
+  animation:rankIconPulse 1.6s ease-in-out infinite;
+}
+.rank-up-hero h2{
+  margin-bottom:6px;
+  font-size:34px;
+}
+.rank-up-hero p{
+  color:var(--muted);
+  max-width:520px;
+  margin:0 auto 16px;
+}
+.rank-up-change{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  flex-wrap:wrap;
+  margin:12px 0;
+}
+.rank-up-change span{
+  padding:9px 12px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.06);
+  font-weight:900;
+  font-size:13px;
+}
+.rank-up-change b{
+  color:#fbbf24;
+  font-size:22px;
+}
+.rank-up-stats{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:10px;
+  margin:18px 0;
+}
+.rank-up-stats div{
+  padding:12px;
+  border-radius:18px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.10);
+}
+.rank-up-stats strong{
+  display:block;
+  font-size:20px;
+}
+.rank-up-stats span{
+  display:block;
+  margin-top:3px;
+  color:var(--muted);
+  font-size:12px;
+}
+.center-actions{
+  justify-content:center;
+}
+.rank-confetti{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  overflow:hidden;
+  z-index:1;
+}
+.rank-confetti i{
+  position:absolute;
+  top:-18px;
+  width:8px;
+  height:16px;
+  border-radius:3px;
+  background:#fbbf24;
+  opacity:.9;
+  animation:confettiFall 1.8s linear infinite;
+}
+.rank-confetti i:nth-child(1){left:10%;animation-delay:.05s;background:#f59e0b;}
+.rank-confetti i:nth-child(2){left:22%;animation-delay:.35s;background:#fff7ed;}
+.rank-confetti i:nth-child(3){left:35%;animation-delay:.12s;background:#fbbf24;}
+.rank-confetti i:nth-child(4){left:48%;animation-delay:.50s;background:#fb7185;}
+.rank-confetti i:nth-child(5){left:61%;animation-delay:.22s;background:#f59e0b;}
+.rank-confetti i:nth-child(6){left:73%;animation-delay:.42s;background:#fff7ed;}
+.rank-confetti i:nth-child(7){left:84%;animation-delay:.16s;background:#fbbf24;}
+.rank-confetti i:nth-child(8){left:93%;animation-delay:.62s;background:#fb7185;}
+@keyframes rankPopIn{
+  from{transform:translateY(18px) scale(.94);opacity:0;}
+  to{transform:translateY(0) scale(1);opacity:1;}
+}
+@keyframes rankIconPulse{
+  0%,100%{transform:scale(1) rotate(0deg);}
+  50%{transform:scale(1.06) rotate(-2deg);}
+}
+@keyframes confettiFall{
+  0%{transform:translateY(-24px) rotate(0deg);opacity:0;}
+  10%{opacity:.95;}
+  100%{transform:translateY(540px) rotate(330deg);opacity:0;}
+}
+@media (max-width:620px){
+  .rank-up-hero h2{font-size:28px;}
+  .rank-up-stats{grid-template-columns:1fr;}
+  .rank-up-icon{width:84px;height:84px;font-size:46px;}
+}
