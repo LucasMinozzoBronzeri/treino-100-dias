@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.2.0';
+const APP_VERSION = '7.3.0';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -287,6 +287,17 @@ function ensureProfile(p){
   if(typeof p.ai.autoWorkoutReport !== 'boolean') p.ai.autoWorkoutReport = true;
   if(!Array.isArray(p.history)) p.history=[];
   if(!Array.isArray(p.dailyCheckins)) p.dailyCheckins=[];
+  if(!p.routine) p.routine={};
+  if(!p.routine.wakeTime) p.routine.wakeTime='09:00';
+  if(!p.routine.lunchTime) p.routine.lunchTime='13:00';
+  if(!p.routine.dinnerTime) p.routine.dinnerTime='20:00';
+  if(!('workdayDescription' in p.routine)) p.routine.workdayDescription='';
+  if(!p.reminders) p.reminders={};
+  if(!p.reminders.types) p.reminders.types={workout:false, meals:false, water:false};
+  if(!('enabled' in p.reminders)) p.reminders.enabled=!!(p.reminders.types.workout||p.reminders.types.meals||p.reminders.types.water);
+  if(!p.reminders.times) p.reminders.times={};
+  if(!p.reminders.times.workout) p.reminders.times.workout='12:00';
+  if(!p.reminders.water) p.reminders.water={intervalHours:2,start:'09:00',end:'21:00'};
   if(!p.nutritionChecks) p.nutritionChecks={};
   if(!Array.isArray(p.quickCoachLogs)) p.quickCoachLogs=[];
   if(!('activeWorkoutAdjustment' in p)) p.activeWorkoutAdjustment=null;
@@ -310,6 +321,88 @@ function fmtDateTime(iso){
 }
 function byId(id){ return document.getElementById(id); }
 function esc(s){ return String(s ?? '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+
+function normalizeTimeText(value, fallback='12:00'){
+  const raw = String(value || '').trim();
+  const fb = String(fallback || '12:00').trim();
+  const match = raw.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+  if(!match) return fb;
+  let h = Math.max(0, Math.min(23, Number(match[1])));
+  let m = Math.max(0, Math.min(59, Number(match[2] ?? 0)));
+  if(!Number.isFinite(h) || !Number.isFinite(m)) return fb;
+  return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+}
+function minutesToTime(total, fallback='12:00'){
+  if(!Number.isFinite(Number(total))) return fallback;
+  const mins = ((Math.round(Number(total)) % 1440) + 1440) % 1440;
+  const h = Math.floor(mins/60);
+  const m = mins%60;
+  return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+}
+function safeTimeMinutes(t, fallbackMinutes=null){
+  const m = String(t || '').match(/^(\d{1,2}):(\d{2})/);
+  if(!m) return fallbackMinutes;
+  const h=Number(m[1]), min=Number(m[2]);
+  if(!Number.isFinite(h) || !Number.isFinite(min) || h<0 || h>23 || min<0 || min>59) return fallbackMinutes;
+  return h*60+min;
+}
+function suggestedWorkoutTimeFromRoutine(p=profile()){
+  const r = p?.routine || {};
+  const remWorkout = p?.reminders?.times?.workout;
+  if(remWorkout) return normalizeTimeText(remWorkout, '12:00');
+  const lunch = safeTimeMinutes(r.lunchTime, 13*60);
+  const dinner = safeTimeMinutes(r.dinnerTime, 20*60);
+  const wake = safeTimeMinutes(r.wakeTime, 9*60);
+  const desc = String(r.workdayDescription || '').toLowerCase();
+  if(desc.includes('manhã') || desc.includes('manha')) return minutesToTime(Math.max(wake+90, 7*60), '08:00');
+  if(desc.includes('noite')) return minutesToTime(Math.max(dinner+90, 19*60), '19:00');
+  if(desc.includes('almoço') || desc.includes('almoco') || desc.includes('meio dia') || desc.includes('meio-dia')) return minutesToTime(Math.max(wake+120, lunch-60), '12:00');
+  if(lunch) return minutesToTime(Math.max(wake+120, lunch-60), '12:00');
+  return '12:00';
+}
+function routineSummary(p=profile()){
+  const r = p?.routine || {};
+  const rem = p?.reminders || {};
+  const parts = [];
+  if(r.wakeTime) parts.push('acorda ' + normalizeTimeText(r.wakeTime,'09:00'));
+  if(r.lunchTime) parts.push('almoça ' + normalizeTimeText(r.lunchTime,'13:00'));
+  if(r.dinnerTime) parts.push('janta ' + normalizeTimeText(r.dinnerTime,'20:00'));
+  const workout = rem?.times?.workout || suggestedWorkoutTimeFromRoutine(p);
+  if(workout) parts.push('treino sugerido ' + normalizeTimeText(workout,'12:00'));
+  const active=[];
+  if(rem?.types?.workout) active.push('treino');
+  if(rem?.types?.meals) active.push('refeições');
+  if(rem?.types?.water) active.push('água');
+  if(active.length) parts.push('lembretes: ' + active.join(', '));
+  if(r.workdayDescription) parts.push('dia útil: ' + r.workdayDescription);
+  return parts.join(' • ');
+}
+
+function remindersSummary(p=profile()){
+  const rem = p?.reminders || {};
+  const r = p?.routine || {};
+  const types = rem.types || {};
+  const water = rem.water || {};
+  const times = rem.times || {};
+  const parts = [];
+  if(types.workout){
+    parts.push('treino ' + normalizeTimeText(times.workout || suggestedWorkoutTimeFromRoutine(p), '12:00'));
+  }
+  if(types.meals){
+    const mealParts = [];
+    if(r.lunchTime) mealParts.push('almoço ' + normalizeTimeText(r.lunchTime, '13:00'));
+    if(r.dinnerTime) mealParts.push('jantar ' + normalizeTimeText(r.dinnerTime, '20:00'));
+    parts.push(mealParts.length ? mealParts.join(' / ') : 'refeições ativas');
+  }
+  if(types.water){
+    const interval = Number(water.intervalHours || 2);
+    const start = normalizeTimeText(water.start || r.wakeTime || '09:00', '09:00');
+    const end = normalizeTimeText(water.end || '21:00', '21:00');
+    parts.push(`água a cada ${interval}h (${start}-${end})`);
+  }
+  return parts.length ? parts.join(' • ') : 'sem lembretes ativos';
+}
+
 function workoutById(p,id){ return p.workouts.find(w=>w.id===id); }
 function currentWorkout(p=profile()){ return workoutById(p, p.queue[0]); }
 function allExercises(p=profile()){ return p.workouts.flatMap(w=>w.exercises.map(e=>({...e, workoutId:w.id, workoutName:w.name}))); }
@@ -1364,7 +1457,13 @@ function render(){
   updateLevelHeader();
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.screen===screen));
   const map = {home:renderHome, workouts:renderWorkouts, progress:renderProgress, checkin:renderCheckin, coach:renderCoach, profile:renderProfile};
-  byId('content').innerHTML = onlineNoticeHTML() + map[screen]() + appFooterHTML();
+  try{
+    const view = map[screen] || renderHome;
+    byId('content').innerHTML = onlineNoticeHTML() + view() + appFooterHTML();
+  }catch(err){
+    console.error('Erro ao renderizar tela', screen, err);
+    byId('content').innerHTML = onlineNoticeHTML() + `<section class="card"><div class="card-title"><div><h3>Não consegui abrir esta tela</h3><p>Erro temporário ao carregar ${esc(titleFor(screen))}. Tente atualizar o app.</p></div><span class="badge red">erro</span></div><p class="muted">${esc(err && err.message ? err.message : 'erro desconhecido')}</p><div class="actions"><button class="btn" data-screen-go="home">Voltar ao início</button></div></section>` + appFooterHTML();
+  }
   bindScreen();
 }
 
@@ -1428,18 +1527,40 @@ function renderVerifyEmailOnboarding(){
 }
 
 function renderSignupOnboarding(){
-  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Criar conta</p><h2>Monte seu perfil inicial</h2><p>Preencha seu perfil para criar um plano inicial mais coerente com sua rotina.</p></div></section>
-  <section class="auth-center"><div class="card auth-card wide">
-    <div class="card-title"><div><h3>Dados da conta</h3><p>Perfil + login + primeiro treino com IA.</p></div><span class="badge green">IA inclusa</span></div>
-    ${onboardingProfileFields('signup')}
-    <div class="form-grid">
-      <div class="field"><label>E-mail</label><input class="input" id="signupEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div>
-      <div class="field"><label>Senha</label><input class="input" id="signupPassword" type="password" autocomplete="new-password" placeholder="Maiúscula, número e especial"></div>
-      <div class="field"><label>Confirmar senha</label><input class="input" id="signupPassword2" type="password" autocomplete="new-password" placeholder="repita a senha"></div>
-      <label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="signupAcceptTerms"> <span>Li e aceito os Termos, a Política de Privacidade e entendo que o Gym Bronze não substitui profissionais de saúde, nutrição ou educação física.</span></label>
+  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Criar conta</p><h2>Monte seu perfil inicial</h2><p>Cadastro em 3 passos para não ficar pesado: perfil, rotina/lembretes e acesso.</p></div></section>
+  <section class="auth-center"><div class="card auth-card wide signup-wizard-card">
+    <div class="card-title"><div><h3>Criar conta</h3><p>Perfil + rotina + login. A barra mostra seu avanço.</p></div><span class="badge green">IA inclusa</span></div>
+    <div class="signup-progress" aria-label="Progresso do cadastro">
+      <div class="signup-progress-track"><span id="signupProgressFill"></span></div>
+      <div class="signup-step-dots">
+        <span class="signup-step-dot" data-step-dot="1">Perfil</span>
+        <span class="signup-step-dot" data-step-dot="2">Rotina</span>
+        <span class="signup-step-dot" data-step-dot="3">Conta</span>
+      </div>
     </div>
-    <p class="form-error hidden" id="signupError"></p>
-    <div class="actions"><button class="btn full" data-onboarding="signup">Criar conta</button><button class="btn secondary full" data-onboarding="show-login">Voltar ao login</button></div>
+    <div class="signup-step-panel" data-signup-step="1">
+      <div class="section-head compact"><div><h3>1. Informações pessoais</h3><p>Base para a IA montar treino, metas e recomendações.</p></div></div>
+      ${onboardingPersonalFields('signup')}
+      <p class="form-error hidden" id="signupStep1Error"></p>
+      <div class="actions"><button class="btn full" data-onboarding="signup-next" type="button">Próximo</button><button class="btn secondary full" data-onboarding="show-login" type="button">Voltar ao login</button></div>
+    </div>
+    <div class="signup-step-panel" data-signup-step="2">
+      <div class="section-head compact"><div><h3>2. Rotina e lembretes</h3><p>Opcional, mas ajuda muito a organizar nutrição, treino e água.</p></div><span class="badge orange">Opcional</span></div>
+      ${onboardingRoutineFields('signup')}
+      <p class="form-error hidden" id="signupStep2Error"></p>
+      <div class="actions"><button class="btn full" data-onboarding="signup-next" type="button">Próximo</button><button class="btn secondary full" data-onboarding="signup-back" type="button">Voltar</button></div>
+    </div>
+    <div class="signup-step-panel" data-signup-step="3">
+      <div class="section-head compact"><div><h3>3. Acesso da conta</h3><p>Agora só falta e-mail, senha e aceite dos termos.</p></div></div>
+      <div class="form-grid">
+        <div class="field"><label>E-mail</label><input class="input" id="signupEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div>
+        <div class="field"><label>Senha</label><input class="input" id="signupPassword" type="password" autocomplete="new-password" placeholder="Maiúscula, número e especial"></div>
+        <div class="field"><label>Confirmar senha</label><input class="input" id="signupPassword2" type="password" autocomplete="new-password" placeholder="repita a senha"></div>
+        <label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="signupAcceptTerms"> <span>Li e aceito os Termos, a Política de Privacidade e entendo que o Gym Bronze não substitui profissionais de saúde, nutrição ou educação física.</span></label>
+      </div>
+      <p class="form-error hidden" id="signupError"></p>
+      <div class="actions"><button class="btn full" data-onboarding="signup">Criar conta</button><button class="btn secondary full" data-onboarding="signup-back" type="button">Voltar</button></div>
+    </div>
   </div></section>`;
 }
 function renderLocalOnboarding(){
@@ -1453,7 +1574,7 @@ function renderLocalOnboarding(){
     <p class="muted">Se limpar os dados do navegador, o histórico local pode ser perdido. Para recuperar em outro dispositivo, use uma conta.</p>
   </div></section>`;
 }
-function onboardingProfileFields(prefix){
+function onboardingPersonalFields(prefix){
   return `<div class="form-grid">
     <div class="field"><label>Nome</label><input class="input" id="${prefix}Name" placeholder="Seu nome"></div>
     <div class="field"><label>Idade</label><input class="input" id="${prefix}Age" type="number" min="12" max="99" placeholder="ex: 21"></div>
@@ -1467,22 +1588,72 @@ function onboardingProfileFields(prefix){
     <div class="field" style="grid-column:1/-1"><label>Observações importantes</label><textarea id="${prefix}Notes" placeholder="Dor, limitação, tempo disponível, exercícios que gosta/não gosta, restrições alimentares..."></textarea></div>
   </div>`;
 }
+function onboardingRoutineFields(prefix){
+  return `<div class="onboarding-routine">
+    <div class="form-grid">
+      <div class="field"><label>Que horas você acorda?</label><input class="input" id="${prefix}WakeTime" type="time" value="09:00"></div>
+      <div class="field"><label>Almoço médio</label><input class="input" id="${prefix}LunchTime" type="time" value="13:00"></div>
+      <div class="field"><label>Jantar médio</label><input class="input" id="${prefix}DinnerTime" type="time" value="20:00"></div>
+      <div class="field"><label>Horário de treino, se souber</label><input class="input" id="${prefix}WorkoutTime" type="time" value="12:00"></div>
+      <div class="field" style="grid-column:1/-1"><label>Quer contar como funciona seu dia útil?</label><textarea id="${prefix}WorkdayDescription" placeholder="ex: acordo tarde, trabalho no computador, treino perto do almoço, chego cansado à noite..."></textarea></div>
+    </div>
+    <div class="reminder-checks">
+      <label class="legal-check"><input type="checkbox" id="${prefix}RemWorkout"> <span>Receber lembrete de treino</span></label>
+      <label class="legal-check"><input type="checkbox" id="${prefix}RemMeals"> <span>Receber lembretes de refeição</span></label>
+      <label class="legal-check"><input type="checkbox" id="${prefix}RemWater"> <span>Receber lembrete de beber água</span></label>
+    </div>
+    <p class="muted">As preferências ficam salvas no Supabase. A permissão da notificação precisa ser liberada no aparelho/navegador.</p>
+  </div>`;
+}
+function onboardingProfileFields(prefix){
+  return `<div class="form-grid">
+    <div class="field"><label>Nome</label><input class="input" id="${prefix}Name" placeholder="Seu nome"></div>
+    <div class="field"><label>Idade</label><input class="input" id="${prefix}Age" type="number" min="12" max="99" placeholder="ex: 21"></div>
+    <div class="field"><label>Sexo</label><select class="select" id="${prefix}Sex"><option value="">Selecione</option><option value="Homem">Homem</option><option value="Mulher">Mulher</option><option value="Outro/Prefiro não informar">Outro/Prefiro não informar</option></select></div>
+    <div class="field"><label>Altura</label><input class="input" id="${prefix}Height" inputmode="decimal" placeholder="ex: 1,88"></div>
+    <div class="field"><label>Peso inicial</label><input class="input" id="${prefix}Weight" inputmode="decimal" placeholder="ex: 83,2"></div>
+    <div class="field"><label>Objetivo</label><input class="input" id="${prefix}Goal" placeholder="ex: ganhar massa e secar"></div>
+    <div class="field"><label>Foco principal</label><input class="input" id="${prefix}Focus" placeholder="ex: peito, braços, recomposição"></div>
+    <div class="field"><label>Nível</label><select class="select" id="${prefix}Experience"><option value="">Selecione</option><option>Iniciante</option><option>Intermediário</option><option>Avançado</option></select></div>
+    <div class="field"><label>Dias por semana</label><select class="select" id="${prefix}Days"><option value="2">2 dias</option><option value="3">3 dias</option><option value="4">4 dias</option><option value="5" selected>5 dias</option><option value="6">6 dias</option></select></div>
+    <div class="onboarding-routine" style="grid-column:1/-1">
+      <div class="card-title"><div><h3>Rotina e lembretes</h3><p>Ajuda a IA a montar nutrição melhor e prepara notificações discretas.</p></div><span class="badge orange">Opcional</span></div>
+      <div class="form-grid">
+        <div class="field"><label>Que horas você acorda?</label><input class="input" id="${prefix}WakeTime" type="time" value="09:00"></div>
+        <div class="field"><label>Almoço médio</label><input class="input" id="${prefix}LunchTime" type="time" value="13:00"></div>
+        <div class="field"><label>Jantar médio</label><input class="input" id="${prefix}DinnerTime" type="time" value="20:00"></div>
+        <div class="field"><label>Horário de treino, se souber</label><input class="input" id="${prefix}WorkoutTime" type="time" value="12:00"></div>
+        <div class="field" style="grid-column:1/-1"><label>Quer contar como funciona seu dia útil?</label><textarea id="${prefix}WorkdayDescription" placeholder="ex: acordo tarde, treino no almoço, trabalho à tarde, chego cansado à noite..."></textarea></div>
+      </div>
+      <div class="reminder-checks">
+        <label class="legal-check"><input type="checkbox" id="${prefix}RemWorkout"> <span>Receber lembrete de treino</span></label>
+        <label class="legal-check"><input type="checkbox" id="${prefix}RemMeals"> <span>Receber lembretes de refeição</span></label>
+        <label class="legal-check"><input type="checkbox" id="${prefix}RemWater"> <span>Receber lembrete de beber água</span></label>
+      </div>
+      <p class="muted">As notificações dependem da permissão do navegador e funcionam melhor com o app instalado.</p>
+    </div>
+    <div class="field" style="grid-column:1/-1"><label>Observações importantes</label><textarea id="${prefix}Notes" placeholder="Dor, limitação, tempo disponível, exercícios que gosta/não gosta, restrições alimentares..."></textarea></div>
+  </div>`;
+}
 function bindOnboarding(){
   document.querySelectorAll('[data-onboarding]').forEach(btn=>btn.onclick=()=>handleOnboarding(btn.dataset.onboarding));
+  if(onboardingView==='signup') setSignupStep(signupStep);
   if(state.pendingProfileCompletion){
     const p=profile() || {};
-    const map={Name:p.name||state.pendingProfileCompletion.name||'', Age:p.age||'', Sex:p.sex||'', Height:p.height||'', Weight:p.weight||'', Goal:p.goal||'', Focus:p.focus||'', Experience:p.experience||'Iniciante', Days:p.daysPerWeek||'5', Notes:p.notes||''};
+    const map={Name:p.name||state.pendingProfileCompletion.name||'', Age:p.age||'', Sex:p.sex||'', Height:p.height||'', Weight:p.weight||'', Goal:p.goal||'', Focus:p.focus||'', Experience:p.experience||'Iniciante', Days:p.daysPerWeek||'5', WakeTime:p.routine?.wakeTime||'09:00', LunchTime:p.routine?.lunchTime||'13:00', DinnerTime:p.routine?.dinnerTime||'20:00', WorkoutTime:p.reminders?.times?.workout||'12:00', WorkdayDescription:p.routine?.workdayDescription||'', Notes:p.notes||''};
     Object.entries(map).forEach(([k,v])=>{ const el=byId('google'+k); if(el && !el.value) el.value=v; });
   }
 }
 function handleOnboarding(action){
-  if(action==='show-signup'){ onboardingView='signup'; render(); return; }
+  if(action==='show-signup'){ onboardingView='signup'; signupStep=1; render(); return; }
   if(action==='show-local'){ onboardingView='local'; render(); return; }
   if(action==='show-login'){ onboardingView='login'; render(); return; }
   if(action==='login') return onboardingLogin();
   if(action==='google-login') return onboardingGoogleLogin();
   if(action==='google-complete') return onboardingGoogleComplete();
   if(action==='google-logout') return googleCompletionLogout();
+  if(action==='signup-next') return signupWizardNext();
+  if(action==='signup-back') return signupWizardBack();
   if(action==='signup') return onboardingSignup();
   if(action==='local') return onboardingLocal();
   if(action==='verify-login') return verifyEmailLoginNow();
@@ -1491,6 +1662,31 @@ function handleOnboarding(action){
 }
 
 
+function setSignupStep(step){
+  signupStep=Math.max(1, Math.min(3, Number(step)||1));
+  document.querySelectorAll('.signup-step-panel').forEach(panel=>{
+    panel.classList.toggle('active', Number(panel.dataset.signupStep)===signupStep);
+  });
+  document.querySelectorAll('.signup-step-dot').forEach(dot=>{
+    const n=Number(dot.dataset.stepDot||0);
+    dot.classList.toggle('active', n===signupStep);
+    dot.classList.toggle('done', n<signupStep);
+  });
+  const fill=byId('signupProgressFill');
+  if(fill) fill.style.width = `${Math.round((signupStep/3)*100)}%`;
+}
+function signupWizardNext(){
+  if(signupStep===1){
+    const msg=validateProfileInfo(readOnboardingProfile('signup'));
+    if(msg) return showFormError('signupStep1Error', msg);
+  }
+  setSignupStep(signupStep+1);
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function signupWizardBack(){
+  setSignupStep(signupStep-1);
+  window.scrollTo({top:0, behavior:'smooth'});
+}
 function readOnboardingProfile(prefix){
   return {
     name: byId(prefix+'Name')?.value?.trim() || '',
@@ -1502,9 +1698,70 @@ function readOnboardingProfile(prefix){
     focus: byId(prefix+'Focus')?.value?.trim() || '',
     experience: byId(prefix+'Experience')?.value?.trim() || '',
     daysPerWeek: byId(prefix+'Days')?.value?.trim() || '',
+    routine:{
+      wakeTime: normalizeTimeText(byId(prefix+'WakeTime')?.value, '09:00'),
+      lunchTime: normalizeTimeText(byId(prefix+'LunchTime')?.value, '13:00'),
+      dinnerTime: normalizeTimeText(byId(prefix+'DinnerTime')?.value, '20:00'),
+      workdayDescription: byId(prefix+'WorkdayDescription')?.value?.trim() || ''
+    },
+    reminders:{
+      enabled: !!(byId(prefix+'RemWorkout')?.checked || byId(prefix+'RemMeals')?.checked || byId(prefix+'RemWater')?.checked),
+      types:{workout:!!byId(prefix+'RemWorkout')?.checked, meals:!!byId(prefix+'RemMeals')?.checked, water:!!byId(prefix+'RemWater')?.checked},
+      times:{workout: normalizeTimeText(byId(prefix+'WorkoutTime')?.value, '12:00')},
+      water:{intervalHours:2, start:normalizeTimeText(byId(prefix+'WakeTime')?.value, '09:00'), end:'21:00'}
+    },
     notes: byId(prefix+'Notes')?.value?.trim() || ''
   };
 }
+
+async function maybeAskNotificationPermissionForProfile(p=profile()){
+  ensureProfile(p);
+  if(!p.reminders?.enabled) return;
+  const ok=await requestReminderPermission();
+  p.reminders.permission=ok?'granted':(notificationAvailable()?Notification.permission:'unsupported');
+  save();
+  if(ok) toast('Lembretes ativados neste aparelho.');
+  else toast('Lembretes salvos. Ative a permissão do navegador quando quiser receber notificações.');
+}
+
+function notificationAvailable(){
+  return typeof window !== 'undefined' && 'Notification' in window;
+}
+async function requestReminderPermission(){
+  try{
+    if(!notificationAvailable()) return false;
+    if(Notification.permission === 'granted') return true;
+    if(Notification.permission === 'denied') return false;
+    const result = await Notification.requestPermission();
+    return result === 'granted';
+  }catch(e){
+    return false;
+  }
+}
+function showReminderNotification(title, body){
+  try{
+    if(!notificationAvailable() || Notification.permission !== 'granted') return false;
+    const options = {
+      body: body || '',
+      icon: './icons/icon-192.png',
+      badge: './icons/icon-192.png',
+      tag: 'gym-bronze-reminder',
+      renotify: false
+    };
+    if(navigator.serviceWorker && navigator.serviceWorker.ready){
+      navigator.serviceWorker.ready.then(reg=>{
+        if(reg && reg.showNotification) reg.showNotification(title, options);
+        else new Notification(title, options);
+      }).catch(()=>new Notification(title, options));
+    }else{
+      new Notification(title, options);
+    }
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+
 function showFormError(id, message){
   const el=byId(id);
   if(!el){ toast(message); return; }
@@ -1537,6 +1794,8 @@ function normalizeProfileInfoFromUser(user){
     focus: meta.focus || '',
     experience: meta.experience || 'Iniciante',
     daysPerWeek: String(meta.daysPerWeek || meta.days_per_week || 5),
+    routine: meta.routine || {wakeTime:meta.wake_time||'09:00', lunchTime:meta.lunch_time||'13:00', dinnerTime:meta.dinner_time||'20:00', workdayDescription:meta.workday_description||''},
+    reminders: meta.reminders || null,
     notes: meta.notes || ''
   };
 }
@@ -1586,6 +1845,7 @@ async function onboardingGoogleComplete(){
   p.cloudUserId=cloudUser.id;
   p.accountEmail=cloudUser.email || p.accountEmail || '';
   markLegalAcceptance(p);
+  await maybeAskNotificationPermissionForProfile(p);
   state.pendingProfileCompletion=null;
   state.pendingEmailVerification=null;
   state.onboardingDone=true;
@@ -1637,7 +1897,9 @@ async function fetchCloudProfileInfo(user){
       focus:data.focus || '',
       experience:data.experience || 'Iniciante',
       daysPerWeek:String(data.days_per_week || 5),
-      notes:data.notes || ''
+      notes:data.notes || '',
+      routine:data.routine || {wakeTime:data.wake_time||'09:00', lunchTime:data.lunch_time||'13:00', dinnerTime:data.dinner_time||'20:00', workdayDescription:data.workday_description||''},
+      reminders:data.reminders || null
     };
   }catch(e){ return null; }
 }
@@ -1749,6 +2011,21 @@ function applyProfileInfo(info, targetProfile=null){
   p.experience=normalizeExperienceLabel(info.experience);
   p.daysPerWeek=String(clampTrainingDays(info.daysPerWeek));
   p.notes=info.notes;
+  if(info.routine){
+    p.routine={
+      ...(p.routine||{}),
+      wakeTime:normalizeTimeText(info.routine.wakeTime,'09:00'),
+      lunchTime:normalizeTimeText(info.routine.lunchTime,'13:00'),
+      dinnerTime:normalizeTimeText(info.routine.dinnerTime,'20:00'),
+      workdayDescription:info.routine.workdayDescription||''
+    };
+  }
+  if(info.reminders){
+    p.reminders={...(p.reminders||{}), ...info.reminders, types:{...(p.reminders?.types||{}), ...(info.reminders.types||{})}, times:{...(p.reminders?.times||{}), ...(info.reminders.times||{})}, water:{...(p.reminders?.water||{}), ...(info.reminders.water||{})}};
+    p.reminders.enabled=!!(p.reminders.types?.workout||p.reminders.types?.meals||p.reminders.types?.water);
+  }else if(p.routine && !p.reminders?.times?.workout){
+    p.reminders={...(p.reminders||{}), times:{...(p.reminders?.times||{}), workout:suggestedWorkoutTimeFromRoutine(p)}};
+  }
   applyProgramDuration(p);
   ensureProfile(p);
   if(!Array.isArray(p.workouts) || !p.workouts.length){
@@ -1842,6 +2119,7 @@ async function onboardingSignup(){
 
   applyProfileInfo(info);
   markLegalAcceptance();
+  await maybeAskNotificationPermissionForProfile(profile());
   const legalInfo = {
     acceptedTermsAt: profile().acceptedTermsAt || nowISO(),
     acceptedPrivacyAt: profile().acceptedPrivacyAt || nowISO()
@@ -1866,6 +2144,12 @@ async function onboardingSignup(){
         daysPerWeek:info.daysPerWeek,
         days_per_week:info.daysPerWeek,
         notes:info.notes || '',
+        routine:info.routine || null,
+        reminders:info.reminders || null,
+        wake_time:info.routine?.wakeTime || '',
+        lunch_time:info.routine?.lunchTime || '',
+        dinner_time:info.routine?.dinnerTime || '',
+        workday_description:info.routine?.workdayDescription || '',
         accepted_terms_at:legalInfo.acceptedTermsAt,
         accepted_privacy_at:legalInfo.acceptedPrivacyAt
       },
@@ -1902,6 +2186,7 @@ async function onboardingLocal(){
   // nome, histórico, fila ou sessão anônima anterior.
   createFreshLocalProfile(info);
   markLegalAcceptance();
+  await maybeAskNotificationPermissionForProfile(profile());
   state.onboardingDone=true;
   state.entryMode='local';
   save();
@@ -2061,6 +2346,39 @@ function historyRowHTML(h){
 }
 
 
+
+function remindersPanelHTML(p){
+  ensureProfile(p);
+  const routine=p.routine||{};
+  const reminders=p.reminders||{};
+  const types=reminders.types||{};
+  const times=reminders.times||{};
+  const water=reminders.water||{};
+  const permission = notificationAvailable() ? (Notification.permission || 'default') : 'unsupported';
+  const permissionLabel = permission==='granted' ? 'permitidas' : permission==='denied' ? 'bloqueadas' : permission==='unsupported' ? 'não suportadas' : 'não ativadas';
+  return `<div class="routine-panel">
+    <div class="form-grid">
+      <div class="field"><label>Que horas você acorda?</label><input class="input" type="time" data-profile-field="routine.wakeTime" value="${esc(routine.wakeTime||'09:00')}"></div>
+      <div class="field"><label>Almoço médio</label><input class="input" type="time" data-profile-field="routine.lunchTime" value="${esc(routine.lunchTime||'13:00')}"></div>
+      <div class="field"><label>Jantar médio</label><input class="input" type="time" data-profile-field="routine.dinnerTime" value="${esc(routine.dinnerTime||'20:00')}"></div>
+      <div class="field"><label>Horário de treino</label><input class="input" type="time" data-profile-field="reminders.times.workout" value="${esc(times.workout||suggestedWorkoutTimeFromRoutine(p)||'12:00')}"></div>
+      <div class="field"><label>Água: início</label><input class="input" type="time" data-profile-field="reminders.water.start" value="${esc(water.start||routine.wakeTime||'09:00')}"></div>
+      <div class="field"><label>Água: fim</label><input class="input" type="time" data-profile-field="reminders.water.end" value="${esc(water.end||'21:00')}"></div>
+      <div class="field"><label>Água: intervalo</label><select class="select" data-profile-field="reminders.water.intervalHours">
+        ${[1,2,3,4].map(n=>`<option value="${n}" ${Number(water.intervalHours||2)===n?'selected':''}>a cada ${n}h</option>`).join('')}
+      </select></div>
+      <div class="stat"><strong>${esc(suggestedWorkoutTimeFromRoutine(p)||times.workout||'12:00')}</strong><span>sugestão de treino</span></div>
+      <div class="field" style="grid-column:1/-1"><label>Quer contar como funciona seu dia útil?</label><textarea data-profile-field="routine.workdayDescription" placeholder="ex: acordo tarde, trabalho no computador, treino perto do almoço...">${esc(routine.workdayDescription||'')}</textarea></div>
+    </div>
+    <div class="reminder-checks">
+      <label class="legal-check"><input type="checkbox" data-reminder-type="workout" ${types.workout?'checked':''}> <span>Lembrete de treino</span></label>
+      <label class="legal-check"><input type="checkbox" data-reminder-type="meals" ${types.meals?'checked':''}> <span>Lembretes de refeição</span></label>
+      <label class="legal-check"><input type="checkbox" data-reminder-type="water" ${types.water?'checked':''}> <span>Lembrete de beber água</span></label>
+    </div>
+    <p class="muted">Resumo: ${esc(remindersSummary(p))} • Permissão neste aparelho: ${esc(permissionLabel)}.</p>
+  </div>`;
+}
+
 function renderProfile(){
   const p=profile();
   const ai=p.ai||{};
@@ -2097,6 +2415,15 @@ function renderProfile(){
       <div class="stat"><strong>${esc(p.programLabel || programLabelForProfile(p))}</strong><span>meta do programa</span></div>
       <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div>
     </div><div class="actions"><button class="btn" data-action="save-profile">Salvar treino/perfil</button></div></section>
+  </details>
+
+  <details class="profile-section">
+    <summary><span>Rotina e lembretes</span><small>treino, refeição e água</small></summary>
+    <section class="card"><div class="card-title"><div><h3>Lembretes inteligentes</h3><p>Use seus horários para organizar nutrição e lembretes. Funciona melhor com o app instalado.</p></div><span class="badge orange">v7.3</span></div>
+      ${remindersPanelHTML(p)}
+      <div class="actions"><button class="btn" data-action="save-profile">Salvar rotina</button><button class="btn secondary" data-action="request-notifications">Ativar notificações</button><button class="btn secondary" data-action="test-notification">Testar notificação</button></div>
+      <p class="muted">No PWA, lembretes locais dependem do navegador. Push real com servidor pode entrar em uma versão futura.</p>
+    </section>
   </details>
 
   <details class="profile-section">
@@ -2153,6 +2480,8 @@ function handleAction(a){
   if(a==='new-bio') openBioModal();
   if(a==='edit-current-workout'){ const w=currentWorkout(); if(!w) return toast('Gere um treino primeiro.'); openEditWorkout(w.id); }
   if(a==='test-ai') testAIConnection();
+  if(a==='request-notifications') requestNotificationsFlow();
+  if(a==='test-notification') testReminderNotification();
   if(a==='cloud-login') cloudLogin();
   if(a==='cloud-signup') cloudSignup();
   if(a==='cloud-logout') cloudLogout();
@@ -2181,11 +2510,61 @@ function handleAction(a){
 }
 
 
-function saveProfileForm(){
+
+function setProfileFieldValue(p,path,value){
+  ensureProfile(p);
+  const parts=String(path||'').split('.').filter(Boolean);
+  if(parts.length===1){ p[parts[0]]=value; return; }
+  let obj=p;
+  for(let i=0;i<parts.length-1;i++){
+    if(!obj[parts[i]] || typeof obj[parts[i]]!=='object') obj[parts[i]]={};
+    obj=obj[parts[i]];
+  }
+  obj[parts[parts.length-1]]=value;
+}
+async function requestNotificationsFlow(){
+  const p=profile();
+  saveProfileForm(false);
+  const ok=await requestReminderPermission();
+  ensureProfile(p);
+  p.reminders.permission=ok?'granted':(notificationAvailable()?Notification.permission:'unsupported');
+  if(ok && !p.reminders.enabled){
+    p.reminders.types.workout=true;
+    p.reminders.types.water=true;
+    p.reminders.enabled=true;
+  }
+  save(); render();
+  toast(ok?'Notificações ativadas neste aparelho.':'O navegador não liberou notificações agora.');
+}
+function testReminderNotification(){
+  saveProfileForm(false);
+  const p=profile();
+  const sent=showReminderNotification('Gym Bronze', `Teste de lembrete ativo • ${remindersSummary(p)}`);
+  if(!sent) requestReminderPermission().then(ok=>{
+    if(ok) showReminderNotification('Gym Bronze', `Teste de lembrete ativo • ${remindersSummary(p)}`);
+    toast(ok?'Notificação de teste enviada.':'Permissão de notificação não liberada.');
+  });
+  else toast('Notificação de teste enviada.');
+}
+
+function saveProfileForm(doRender=true){
   const p=profile();
   const beforeDays = String(p.daysPerWeek||'');
   const beforeExp = String(p.experience||'');
-  document.querySelectorAll('[data-profile-field]').forEach(f=>p[f.dataset.profileField]=f.value);
+  document.querySelectorAll('[data-profile-field]').forEach(f=>setProfileFieldValue(p, f.dataset.profileField, f.value));
+  document.querySelectorAll('[data-reminder-type]').forEach(f=>{
+    ensureProfile(p);
+    p.reminders.types[f.dataset.reminderType]=f.checked;
+  });
+  ensureProfile(p);
+  p.reminders.enabled=!!(p.reminders.types?.workout||p.reminders.types?.meals||p.reminders.types?.water);
+  p.routine.wakeTime=normalizeTimeText(p.routine.wakeTime,'09:00');
+  p.routine.lunchTime=normalizeTimeText(p.routine.lunchTime,'13:00');
+  p.routine.dinnerTime=normalizeTimeText(p.routine.dinnerTime,'20:00');
+  p.reminders.times.workout=normalizeTimeText(p.reminders.times.workout, suggestedWorkoutTimeFromRoutine(p));
+  p.reminders.water.start=normalizeTimeText(p.reminders.water.start,p.routine.wakeTime||'09:00');
+  p.reminders.water.end=normalizeTimeText(p.reminders.water.end,'21:00');
+  p.reminders.water.intervalHours=Math.max(1, Math.min(4, Number(p.reminders.water.intervalHours||2)));
   p.experience = normalizeExperienceLabel(p.experience);
   p.daysPerWeek = String(clampTrainingDays(p.daysPerWeek));
   if(p.planMeta?.source === 'default' && !(p.history&&p.history.length) && (beforeDays !== p.daysPerWeek || beforeExp !== p.experience)){
@@ -2198,7 +2577,7 @@ function saveProfileForm(){
   });
   save();
   if(hasCloudAccount()) upsertCloudProfile(null).catch(()=>{});
-  toast('Perfil salvo.'); render();
+  toast('Perfil salvo.'); if(doRender) render();
 }
 async function createProfileFlow(){
   if(supabaseClient){
@@ -2866,7 +3245,9 @@ async function upsertCloudProfile(name=null, sourceInfo=null){
     experience:textOrExisting(p.experience || info.experience || user.user_metadata?.experience, existing?.experience, 'Iniciante'),
     days_per_week:numOrExisting(p.daysPerWeek || info.daysPerWeek || user.user_metadata?.daysPerWeek || user.user_metadata?.days_per_week, existing?.days_per_week, 5),
     accepted_terms_at:p.acceptedTermsAt || existing?.accepted_terms_at || user.user_metadata?.accepted_terms_at || nowISO(),
-    accepted_privacy_at:p.acceptedPrivacyAt || existing?.accepted_privacy_at || user.user_metadata?.accepted_privacy_at || nowISO()
+    accepted_privacy_at:p.acceptedPrivacyAt || existing?.accepted_privacy_at || user.user_metadata?.accepted_privacy_at || nowISO(),
+    routine:p.routine || info.routine || existing?.routine || {},
+    reminders:p.reminders || info.reminders || existing?.reminders || {}
   };
   const { error } = await supabaseClient.from('profiles').upsert(row, { onConflict:'id' });
   if(error) throw error;
@@ -2883,7 +3264,8 @@ function serializeCurrentPlan(p=profile()){
     programLabel:p.programLabel,
     profileSnapshot:{
       name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight,
-      goal:p.goal, focus:p.focus, experience:p.experience, daysPerWeek:p.daysPerWeek, notes:p.notes
+      goal:p.goal, focus:p.focus, experience:p.experience, daysPerWeek:p.daysPerWeek, notes:p.notes,
+      routine:p.routine || {}, reminders:p.reminders || {}
     }
   };
 }
@@ -3114,6 +3496,8 @@ function buildPlanAIPayload(mode='initial', extra={}){
     mode,
     cycleChangeRequest: extra.cycleChangeRequest || '',
     profile:{name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
+    routine:{...(p.routine||{}), summary:routineSummary(p), suggestedWorkoutTime:suggestedWorkoutTimeFromRoutine(p)},
+    reminders:p.reminders || {},
     planRules:{daysPerWeek:clampTrainingDays(p.daysPerWeek), level:normalizeExperienceLabel(p.experience), programWeeks:programWeeksForExperience(p.experience), targetWorkouts:targetWorkoutsForProfile(p), programLabel:programLabelForProfile(p), allowedWorkoutIds:WORKOUT_LETTERS.slice(0, clampTrainingDays(p.daysPerWeek))},
     currentPlan:{title:p.planMeta?.title, cycle:p.planMeta?.cycle, source:p.planMeta?.source, workouts:p.planMeta?.source==='ai'?p.workouts:[]},
     progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, currentCycleNumber(p)+1)},
@@ -3307,6 +3691,8 @@ function buildDietAIPayload(){
   return {
     kind:'diet-plan',
     profile:{name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
+    routine:{...(p.routine||{}), summary:routineSummary(p), suggestedWorkoutTime:suggestedWorkoutTimeFromRoutine(p)},
+    reminders:p.reminders || {},
     currentPlan:{title:p.planMeta?.title, source:p.planMeta?.source, workouts:p.workouts},
     progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, currentCycleNumber(p)+1)},
     todayReadiness:dailyCheckinToday(p),
@@ -3372,4 +3758,48 @@ function exportBackup(){ state.lastBackupAt=nowISO(); save(); const blob=new Blo
 document.addEventListener('change', e=>{ if(e.target?.id==='backupInput'){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ const data=JSON.parse(r.result); if(!data.profiles) throw new Error(); if(confirm('Importar backup e substituir dados atuais?')){ state=data; save(); render(); toast('Backup importado.'); } }catch{ toast('Backup inválido.'); }}; r.readAsText(f); }});
 function toast(msg){ const t=byId('toast'); t.textContent=msg; t.classList.remove('hidden'); clearTimeout(window.__toast); window.__toast=setTimeout(()=>t.classList.add('hidden'),2800); }
 
+
+let __reminderTimer=null;
+let __lastReminderKeys={};
+function timeToMinutes(t){ const m=String(t||'').match(/^(\d{1,2}):(\d{2})/); return m?Number(m[1])*60+Number(m[2]):null; }
+function maybeTriggerLocalReminders(){
+  const p=profile();
+  if(!p?.reminders?.enabled || !notificationAvailable() || Notification.permission!=='granted') return;
+  const now=new Date();
+  const mins=now.getHours()*60+now.getMinutes();
+  const day=dateKey(now);
+  const emit=(key,title,body)=>{
+    const id=day+'-'+key;
+    if(__lastReminderKeys[key]===id) return;
+    __lastReminderKeys[key]=id;
+    showReminderNotification(title, body);
+  };
+  const rem=p.reminders;
+  if(rem.types?.workout && mins===timeToMinutes(rem.times?.workout||'12:00') && !workoutDoneToday(p)){
+    const w=currentWorkout(p);
+    emit('workout','Hora do treino 💪', w?`Hoje é ${w.id} — ${w.name}. Bora manter a sequência?`:'Bora treinar hoje?');
+  }
+  if(rem.types?.meals){
+    const r=p.routine||{};
+    [['lunch','Almoço 🥗',r.lunchTime],['dinner','Jantar 🥗',r.dinnerTime]].forEach(([key,title,time])=>{
+      if(mins===timeToMinutes(time)) emit(key,title,'Hora da refeição. Marca no checklist depois.');
+    });
+  }
+  if(rem.types?.water){
+    const water=rem.water||{};
+    const start=timeToMinutes(water.start||p.routine?.wakeTime||'09:00');
+    const end=timeToMinutes(water.end||'21:00');
+    const interval=Math.max(1, Number(water.intervalHours||2))*60;
+    if(start!==null && end!==null && mins>=start && mins<=end && (mins-start)%interval===0){
+      emit('water-'+mins,'Água agora 💧','Bebe água e mantém o corpo funcionando bem.');
+    }
+  }
+}
+function startReminderLoop(){
+  if(__reminderTimer) clearInterval(__reminderTimer);
+  maybeTriggerLocalReminders();
+  __reminderTimer=setInterval(maybeTriggerLocalReminders, 60*1000);
+}
+
 init();
+startReminderLoop();

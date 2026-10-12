@@ -1160,3 +1160,25 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
 .last-load{margin-top:6px;font-size:11px;color:var(--muted);font-weight:800}.last-load b{color:var(--soft)}.last-load.orange{color:#e0a14d}.last-load.orange b{color:#f4c37e}
 .sub-list{display:grid;gap:8px}.sub-option{text-align:left;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:16px;padding:12px}.sub-option:hover{border-color:rgba(224,161,77,.32);background:rgba(201,119,34,.08)}.sub-option strong{display:block;font-size:14px}.sub-option span{display:block;color:var(--muted);font-size:12px;margin-top:3px}
 @media (max-width:620px){.mission-strip{align-items:flex-start;flex-direction:column}.mission-side{width:100%;justify-content:space-between}.mission-main small{max-width:235px}.streak-pill{font-size:10px}.exercise .actions{display:grid;grid-template-columns:1fr 1fr}.exercise .actions .btn[data-sub-ex]{grid-column:1/-1}}
+
+/* v7.3.0 — rotina e lembretes */
+.onboarding-routine{border:1px solid var(--line);background:rgba(255,255,255,.035);border-radius:22px;padding:14px;margin:4px 0 0}.onboarding-routine .card-title{margin-bottom:10px}.reminder-checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}.routine-summary-card{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}.routine-summary-card>div{border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:18px;padding:12px}.routine-summary-card strong{display:block}.routine-summary-card span{display:block;color:var(--muted);font-size:12px;margin-top:4px}.field label .muted{font-weight:700;font-size:11px}
+@media (max-width:620px){.reminder-checks,.routine-summary-card{grid-template-columns:1fr}.onboarding-routine{padding:12px}.onboarding-routine .form-grid{grid-template-columns:1fr}}
+
+
+/* v7.3 final — cadastro em etapas */
+.signup-wizard-card{overflow:hidden}
+.signup-progress{margin:6px 0 22px}
+.signup-progress-track{height:8px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;border:1px solid rgba(255,255,255,.08)}
+.signup-progress-track span{display:block;height:100%;width:33%;border-radius:999px;background:linear-gradient(90deg,var(--accent),#f2c879);transition:width .25s ease}
+.signup-step-dots{display:flex;justify-content:space-between;gap:8px;margin-top:10px;font-size:12px;color:var(--muted)}
+.signup-step-dot{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.signup-step-dot:before{content:'';width:9px;height:9px;border-radius:999px;background:rgba(255,255,255,.18);box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+.signup-step-dot.active{color:var(--text);font-weight:800}
+.signup-step-dot.active:before,.signup-step-dot.done:before{background:var(--accent)}
+.signup-step-panel{display:none;animation:fadeUp .22s ease both}
+.signup-step-panel.active{display:block}
+.section-head.compact{margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,.08)}
+.section-head.compact h3{margin:0;font-size:18px}
+.section-head.compact p{margin:4px 0 0;color:var(--muted);font-size:13px}
+@media (max-width:620px){.signup-step-dots{font-size:11px}.signup-step-dot{gap:4px}.signup-step-dot:before{width:8px;height:8px}}
