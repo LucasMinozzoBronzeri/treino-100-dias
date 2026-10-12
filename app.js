@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.1.1';
+const APP_VERSION = '7.2.0';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -392,6 +392,49 @@ function dailyScoreDetails(p=profile()){
   const next=parts.find(x=>x.value<x.max);
   return {score, label, parts, next, train, check, nutri, weekDone, weekTarget, weekPct};
 }
+
+function activeDayInfo(p=profile()){
+  const active = new Set();
+  (p.history||[]).forEach(h=>{ if(h.date) active.add(dateKey(h.date)); });
+  (p.dailyCheckins||[]).forEach(c=>{ if(c.dateKey) active.add(c.dateKey); else if(c.date) active.add(dateKey(c.date)); });
+  (p.checkins||[]).forEach(c=>{ if(c.date) active.add(dateKey(c.date)); });
+  Object.values(p.nutritionChecks||{}).forEach(n=>{
+    const total=Object.keys(n.meals||{}).length;
+    const done=Object.values(n.meals||{}).filter(Boolean).length;
+    if(total && done) active.add(n.dateKey || dateKey(n.updatedAt||new Date()));
+  });
+  const today=dateKey();
+  let cursor=new Date();
+  let activeToday=active.has(today);
+  if(!activeToday) cursor.setDate(cursor.getDate()-1);
+  let count=0;
+  for(let i=0;i<120;i++){
+    const key=dateKey(cursor);
+    if(!active.has(key)) break;
+    count++;
+    cursor.setDate(cursor.getDate()-1);
+  }
+  return {count, activeToday, active};
+}
+function dailyFocusMission(p=profile()){
+  const hasPlan=hasWorkoutPlan(p);
+  const w=hasPlan ? currentWorkout(p) : null;
+  const done=workoutDoneToday(p);
+  const daily=dailyCheckinToday(p);
+  const nutri=nutritionStats(p);
+  if(!hasPlan) return {icon:'🧭', title:'Montar plano', text:'Gere seu treino específico para começar direito.', action:'generate-initial-plan', cta:'Gerar treino'};
+  if(!daily) return {icon:'⚡', title:'Check-in rápido', text:'Registre energia, sono e dor antes de treinar.', action:'daily-checkin', cta:'Fazer check-in'};
+  if(!done) return {icon:'🏋️', title:`Treino ${w?.id || ''}`, text:`Concluir ${w?.name || 'o treino de hoje'}.`, action:'start-current', cta:'Iniciar treino'};
+  if(nutri.total && nutri.pct<80) return {icon:'🥗', title:'Fechar nutrição', text:`Checklist em ${nutri.pct}%. Tenta bater 80% hoje.`, action:'nutrition-checklist', cta:'Abrir nutri'};
+  return {icon:'✅', title:'Dia no controle', text:'O essencial está feito. Mantém o ritmo amanhã.', action:'open-score', cta:'Ver score'};
+}
+function missionStripHTML(p=profile()){
+  const st=activeDayInfo(p);
+  const m=dailyFocusMission(p);
+  const streakText = st.count ? `${st.count} dia${st.count>1?'s':''} ativo${st.count>1?'s':''}${st.activeToday?'':' • falta hoje'}` : 'comece hoje';
+  return `<div class="mission-strip"><div class="mission-main"><span>${esc(m.icon)}</span><div><strong>${esc(m.title)}</strong><small>${esc(m.text)}</small></div></div><div class="mission-side"><span class="streak-pill">🔥 ${esc(streakText)}</span><button class="btn sm secondary" data-action="${esc(m.action)}">${esc(m.cta)}</button></div></div>`;
+}
+
 function dailyScore(p=profile()){
   return dailyScoreDetails(p).score;
 }
@@ -488,14 +531,15 @@ function variantExerciseName(e, mode){
 }
 function workoutExercisesForToday(w, p=profile()){
   const v=currentVariant(p);
-  if(!v || !w) return w?.exercises || [];
+  if(!w) return [];
+  if(!v) return applyTemporarySubstitutions(w.exercises || [], p);
   const original=w.exercises||[];
   let selected=original;
   if(v.mode==='fast') selected=original.filter(e=>exerciseKind(e)!=='cardio').slice(0,4);
   else if(v.mode==='light') selected=original.filter(e=>exerciseKind(e)!=='cardio').slice(0, Math.min(5, original.length));
   else if(v.mode==='crowded') selected=original.slice(0, Math.min(6, original.length));
   else if(v.mode==='home') selected=original.filter(e=>exerciseKind(e)!=='cardio').slice(0, Math.min(5, original.length));
-  return selected.map(e=>{
+  return applyTemporarySubstitutions(selected.map(e=>{
     const clone={...e};
     clone.originalName=e.name;
     clone.variantMode=v.mode;
@@ -504,7 +548,7 @@ function workoutExercisesForToday(w, p=profile()){
     if(v.mode==='light') clone.target='2-3 séries leves';
     if(v.mode==='home') clone.target='3 séries controladas';
     return clone;
-  });
+  }), p);
 }
 function variantRules(mode){
   if(mode==='fast') return ['Aqueça rápido, mas não pule completamente.', 'Faça só a lista reduzida e encerre sem culpa.', 'Descanso de 60–90s.'];
@@ -829,6 +873,7 @@ function todayMissionHTML(p=profile()){
       <h2>${esc(missionTitle)}</h2>
       <p>${esc(missionText)}</p>
       <div class="today-actions">${done?'<button class="btn secondary" data-screen-go="progress">Ver progresso</button>':hasPlan?`<button class="btn" data-action="start-current">Iniciar ${w.id}</button>`:`<button class="btn" data-action="generate-initial-plan">Gerar treino</button>`}<button class="btn secondary" data-action="today-workout-center">Ajuste treino hoje</button><button class="btn secondary" data-action="daily-checkin">${daily?'Editar check-in':'Check-in rápido'}</button><button class="btn secondary" data-action="open-levels">Nv. ${levelInfo.roman}</button></div>
+      ${missionStripHTML(p)}
     </div>
     <div class="today-score" data-action="open-score">
       <div class="progress-ring small-ring" style="--p:${score}%"><div class="progress-ring-inner">${score}<small>score</small></div></div>
@@ -2173,6 +2218,87 @@ async function createProfileFlow(){
 function resetProfileFlow(){ const p=profile(); if(!confirm(`Resetar TODO o perfil ${p.name || 'Perfil'}? Isso apaga treinos, cargas, histórico, check-ins e bioimpedância.`)) return; const t=prompt('Digite RESETAR para confirmar:'); if(t!=='RESETAR') return toast('Reset cancelado.'); const fresh=newProfile(p.name); fresh.id=p.id; state.profiles[state.profiles.findIndex(x=>x.id===p.id)] = fresh; save(); render(); toast('Perfil resetado.'); }
 
 
+
+function normalizedExerciseName(name=''){
+  return String(name).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+}
+function latestExerciseLoad(p=profile(), e={}){
+  const wantedId=e.id;
+  const wantedName=normalizedExerciseName(e.originalName || e.name);
+  const list=[...(p.history||[])].reverse();
+  for(const h of list){
+    const weights=h.weights||{};
+    const meta=h.meta||{};
+    if(weights[wantedId]) return {weight:weights[wantedId], date:h.date, workoutName:h.workoutName};
+    const candidates=Object.keys(weights);
+    for(const id of candidates){
+      const maybeName=normalizedExerciseName(meta[id]?.exerciseName || id);
+      if(maybeName && maybeName===wantedName) return {weight:weights[id], date:h.date, workoutName:h.workoutName};
+    }
+  }
+  return null;
+}
+function substituteOptionsForExercise(e={}){
+  const s=normalizedExerciseName((e.originalName||e.name||'')+' '+(e.type||''));
+  const opt=(arr)=>arr.map((name,i)=>({id:'sub_'+i+'_'+Date.now(), name, target:e.target||'3-4 séries', type:e.type||'alternativa'}));
+  if(/supino|peito|peck|crucifixo|crossover/.test(s)) return opt(['Supino com halteres','Flexão de braço','Crucifixo com halteres','Crossover em outra polia']);
+  if(/pulley|remada|costas/.test(s)) return opt(['Remada unilateral com halter','Remada baixa com outra pegada','Pulldown com braço reto','Remada curvada leve']);
+  if(/triceps|tríceps/.test(s)) return opt(['Tríceps corda','Tríceps francês com halter','Tríceps banco','Tríceps unilateral na polia']);
+  if(/rosca|biceps|bíceps/.test(s)) return opt(['Rosca alternada com halteres','Rosca martelo','Rosca direta com barra W','Rosca no cabo com outra pegada']);
+  if(/ombro|elevacao|elevação|desenvolvimento/.test(s)) return opt(['Desenvolvimento com halteres','Elevação lateral com halteres','Elevação lateral na polia oposta','Face pull']);
+  if(/leg|hack|agach|extensora|quadriceps|quadríceps/.test(s)) return opt(['Agachamento goblet','Passada andando','Afundo búlgaro','Leg press unilateral se livre']);
+  if(/stiff|flexora|posterior|mesa/.test(s)) return opt(['Stiff com halteres','Levantamento terra romeno leve','Flexora unilateral se livre','Ponte de glúteo']);
+  if(/panturrilha/.test(s)) return opt(['Panturrilha em pé','Panturrilha no leg press','Panturrilha unilateral','Panturrilha sentado se livre']);
+  if(/abd|prancha|core/.test(s)) return opt(['Prancha','Abdominal máquina livre alternativo','Elevação de pernas','Crunch no solo']);
+  return opt(['Variação livre equivalente','Exercício com halteres','Exercício no cabo livre','Pular e compensar no próximo treino']);
+}
+function tempSubstitutionFor(p,e){
+  const sub=p.tempSubstitutions?.[e.id];
+  if(!sub || sub.dateKey!==dateKey()) return null;
+  return sub;
+}
+function applySubstitutionToExercise(p,e){
+  const sub=tempSubstitutionFor(p,e);
+  if(!sub) return e;
+  return {...e, originalName:e.originalName || e.name, name:sub.name, target:sub.target || e.target, type:sub.type || e.type, temporarySubstitution:true, substituteReason:sub.reason || 'Máquina ocupada'};
+}
+function applyTemporarySubstitutions(list,p=profile()){
+  return (list||[]).map(e=>applySubstitutionToExercise(p,e));
+}
+function openSubstitutionModal(exId){
+  const p=profile();
+  const w=currentWorkout(p);
+  if(!w) return toast('Nenhum treino ativo.');
+  const current=workoutExercisesForToday(w,p).find(e=>e.id===exId) || (w.exercises||[]).find(e=>e.id===exId);
+  if(!current) return toast('Exercício não encontrado.');
+  const original=(w.exercises||[]).find(e=>e.id===exId) || current;
+  const options=substituteOptionsForExercise(original);
+  const layer=byId('modalLayer');
+  layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Academia cheia</p><h2>Trocar só hoje</h2><p class="muted">Substitui ${esc(original.name)} sem alterar seu treino fixo.</p></div><button class="close" data-close>×</button></div>
+    <section class="card compact-card"><div class="card-title"><div><h3>Alternativas rápidas</h3><p>Escolha a mais viável agora. A troca entra no histórico do treino.</p></div><span class="badge orange">Temporário</span></div>
+    <div class="sub-list">${options.map((o,i)=>`<button class="sub-option" data-apply-sub="${i}"><strong>${esc(o.name)}</strong><span>${esc(o.target)}</span></button>`).join('')}</div></section>
+    <div class="field"><label>Ou escreva outra opção</label><input class="input" id="customSubName" placeholder="ex: supino inclinado smith"></div>
+    <div class="actions"><button class="btn" data-apply-custom-sub>Usar opção escrita</button><button class="btn secondary" data-remove-sub="${esc(exId)}">Voltar ao original</button><button class="btn secondary" data-close>Cancelar</button></div></div>`;
+  layer.classList.remove('hidden');
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>openWorkout(w.id));
+  document.querySelectorAll('[data-apply-sub]').forEach(b=>b.onclick=()=>{
+    const chosen=options[Number(b.dataset.applySub)];
+    if(!p.tempSubstitutions) p.tempSubstitutions={};
+    p.tempSubstitutions[exId]={...chosen, originalName:original.name, dateKey:dateKey(), reason:'Máquina ocupada', createdAt:nowISO()};
+    save(); openWorkout(w.id); toast('Substituição aplicada só para hoje.');
+  });
+  const custom=byId('customSubName');
+  document.querySelector('[data-apply-custom-sub]').onclick=()=>{
+    const name=(custom?.value||'').trim();
+    if(!name) return toast('Digite o nome da alternativa.');
+    if(!p.tempSubstitutions) p.tempSubstitutions={};
+    p.tempSubstitutions[exId]={id:'custom_'+Date.now(), name, target:original.target||'3-4 séries', type:original.type||'alternativa', originalName:original.name, dateKey:dateKey(), reason:'Máquina ocupada', createdAt:nowISO()};
+    save(); openWorkout(w.id); toast('Substituição aplicada só para hoje.');
+  };
+  const rem=document.querySelector('[data-remove-sub]');
+  if(rem) rem.onclick=()=>{ if(p.tempSubstitutions) delete p.tempSubstitutions[exId]; save(); openWorkout(w.id); toast('Exercício original restaurado.'); };
+}
+
 function exerciseKind(e){
   if(exerciseIsCardio(e)) return 'cardio';
   const s=String((e?.type||'')+' '+(e?.name||'')).toLowerCase();
@@ -2189,6 +2315,8 @@ function exerciseHTML(p,w,e,isCurrent){
   const adj=currentAdjustment(p);
   const isQuickPriority=!!(adj?.focusExerciseIds||[]).includes(e.id);
   const weight=p.weights[e.id] || '';
+  const lastLoad=latestExerciseLoad(p,e);
+  const sub=tempSubstitutionFor(p,e);
   const locked=!isCurrent;
   const kind=exerciseKind(e);
   const commonTail = `
@@ -2226,7 +2354,7 @@ function exerciseHTML(p,w,e,isCurrent){
   const kindLabel = kind==='cardio' ? 'cardio' : kind==='core' ? 'core' : kind==='mobility' ? 'mobilidade' : (e.type||'força');
   return `<div class="exercise ${done?'done':''} ${status==='skipped'?'skipped':''} ${isQuickPriority?'quick-priority-ex':''}" data-exercise-card="${e.id}">
     <div class="exercise-top">
-      <div><h4>${esc(e.name)}</h4><div class="small">${esc(kindLabel)} • meta ${esc(e.target||'4x12')}${statusTime ? ' • '+esc(statusTime) : ''}</div></div>
+      <div><h4>${esc(e.name)}</h4><div class="small">${esc(kindLabel)} • meta ${esc(e.target||'4x12')}${statusTime ? ' • '+esc(statusTime) : ''}</div>${lastLoad?`<div class="last-load">Última carga: <b>${esc(lastLoad.weight)}</b> • ${esc(fmtDate(lastLoad.date))}</div>`:''}${e.temporarySubstitution?`<div class="last-load orange">Hoje no lugar de: <b>${esc(e.originalName||'exercício original')}</b></div>`:''}</div>
       <span class="badge ${done?'green':status==='skipped'?'yellow':isQuickPriority?'orange':''}">${done?'Concluído':status==='skipped'?'Pulado':isQuickPriority?'Prioridade':isCurrent?'Pendente':'Consulta'}</span>
     </div>
     <div class="exercise-controls ${kind==='cardio'?'cardio-controls':''}">
@@ -2235,6 +2363,7 @@ function exerciseHTML(p,w,e,isCurrent){
     <div class="actions">
       <button class="btn sm green" ${locked?'disabled':''} data-toggle-ex="${e.id}">${done?'Desmarcar':'Concluir'}</button>
       <button class="btn sm secondary" ${locked?'disabled':''} data-skip-ex="${e.id}">Pular</button>
+      <button class="btn sm secondary" ${locked?'disabled':''} data-sub-ex="${e.id}">${sub?'Trocar novamente':'Máquina ocupada'}</button>
     </div>
   </div>`;
 }
@@ -2265,6 +2394,7 @@ function wireWorkoutModal(){
   document.querySelectorAll('[data-meta]').forEach(inp=>inp.oninput=inp.onchange=()=>{ const p=profile(); const id=inp.dataset.exId; if(!p.exerciseMeta[id]) p.exerciseMeta[id]={}; p.exerciseMeta[id][inp.dataset.meta]=inp.value; save(); });
   document.querySelectorAll('[data-toggle-ex]').forEach(b=>b.onclick=()=>toggleDone(b.dataset.toggleEx));
   document.querySelectorAll('[data-skip-ex]').forEach(b=>b.onclick=()=>skipExercise(b.dataset.skipEx));
+  document.querySelectorAll('[data-sub-ex]').forEach(b=>b.onclick=()=>openSubstitutionModal(b.dataset.subEx));
   document.querySelectorAll('[data-finalize-workout]').forEach(b=>b.onclick=()=>finalizeWorkout(b.dataset.finalizeWorkout));
   document.querySelectorAll('[data-edit-workout]').forEach(b=>b.onclick=()=>openEditWorkout(b.dataset.editWorkout));
   document.querySelectorAll('[data-open-quick-coach]').forEach(b=>b.onclick=()=>openQuickCoachModal());
@@ -2340,6 +2470,8 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
     if(p.weights[e.id]) weights[e.id]=p.weights[e.id];
     if(p.tempStatus[e.id]) status[e.id]=p.tempStatus[e.id];
     const metaObj={...(p.exerciseMeta[e.id]||{}), ...(p.tempTimes?.[e.id]||{})};
+    metaObj.exerciseName=e.name;
+    if(e.temporarySubstitution){ metaObj.originalExerciseName=e.originalName||''; metaObj.substituteReason=e.substituteReason||'Máquina ocupada'; }
     if(Object.keys(metaObj).length) metaSnap[e.id]=metaObj;
   });
   const startedAt = p.activeWorkoutSession?.id===id ? p.activeWorkoutSession.startAt : nowISO();
@@ -2352,7 +2484,7 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
   else if(p.ai.autoWorkoutReport && isOffline()) record.aiReportError='IA pausada: você estava offline.';
   else if(p.ai.autoWorkoutReport && !cloudUser) record.aiReportError='IA pausada: entre na conta para gerar relatório.';
   p.history.push(record);
-  p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={}; p.tempTimes={}; p.activeWorkoutSession=null; p.activeWorkoutVariant=null; p.activeWorkoutAdjustment=null;
+  p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={}; p.tempTimes={}; p.activeWorkoutSession=null; p.activeWorkoutVariant=null; p.activeWorkoutAdjustment=null; p.tempSubstitutions={};
   save(); closeModal(); toast(record.aiReportStatus==='pending' ? levelUpToast(xpInfo)+' Gerando relatório com IA...' : (isOffline() ? levelUpToast(xpInfo)+' Salvo offline neste aparelho.' : levelUpToast(xpInfo)));
   maybeShowRankUpModal(xpInfo);
   saveCurrentPlanToCloud('queue_after_workout').catch(()=>{});

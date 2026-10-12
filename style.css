@@ -1138,3 +1138,25 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
   .rank-up-stats{grid-template-columns:1fr;}
   .rank-up-icon{width:84px;height:84px;font-size:46px;}
 }
+
+/* v7.2.0 — retenção leve + troca rápida sem poluir */
+.mission-strip{
+  margin-top:14px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:10px 12px;
+  border:1px solid rgba(224,161,77,.22);
+  background:rgba(201,119,34,.075);
+  border-radius:18px;
+}
+.mission-main{display:flex;align-items:center;gap:10px;min-width:0}
+.mission-main>span{width:34px;height:34px;border-radius:13px;display:grid;place-items:center;background:rgba(255,255,255,.07);flex:0 0 auto}
+.mission-main strong{display:block;font-size:13px;line-height:1.15}
+.mission-main small{display:block;color:var(--muted);font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:330px}
+.mission-side{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.streak-pill{font-size:11px;font-weight:950;color:#f5d7aa;border:1px solid rgba(224,161,77,.22);background:rgba(255,255,255,.045);border-radius:999px;padding:7px 9px;white-space:nowrap}
+.last-load{margin-top:6px;font-size:11px;color:var(--muted);font-weight:800}.last-load b{color:var(--soft)}.last-load.orange{color:#e0a14d}.last-load.orange b{color:#f4c37e}
+.sub-list{display:grid;gap:8px}.sub-option{text-align:left;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:16px;padding:12px}.sub-option:hover{border-color:rgba(224,161,77,.32);background:rgba(201,119,34,.08)}.sub-option strong{display:block;font-size:14px}.sub-option span{display:block;color:var(--muted);font-size:12px;margin-top:3px}
+@media (max-width:620px){.mission-strip{align-items:flex-start;flex-direction:column}.mission-side{width:100%;justify-content:space-between}.mission-main small{max-width:235px}.streak-pill{font-size:10px}.exercise .actions{display:grid;grid-template-columns:1fr 1fr}.exercise .actions .btn[data-sub-ex]{grid-column:1/-1}}
