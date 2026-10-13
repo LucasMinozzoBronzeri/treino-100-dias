@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.5.1';
+const APP_VERSION = '7.6.0';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -239,7 +239,7 @@ function newProfile(name='Novo perfil'){
   const p = {
     id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, sex:'', age:'', height:'', weight:'', goal:'', focus:'', notes:'', experience:'Iniciante', daysPerWeek:'5', dietPlan:null,
     queue: [], progress: 0, target: 20, workouts: [], programWeeks:4, programLabel:'4 semanas • 20 treinos', planMeta:{source:'pending', cycle:1, title:'Aguardando treino inteligente', notes:'Preencha o perfil e gere um treino específico antes de começar.'},
-    weights:{}, exerciseMeta:{}, exerciseGoals:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], ai:{autoWorkoutReport:true}, createdAt: nowISO()
+    weights:{}, exerciseMeta:{}, exerciseGoals:{}, tempDone:{}, tempStatus:{}, history:[], lessons:[], lessonLogs:[], pendingAcademy:[], checkins:[], bio:[], ai:{autoWorkoutReport:true}, createdAt: nowISO()
   };
   applyProgramDuration(p);
   return p;
@@ -289,6 +289,8 @@ function ensureProfile(p){
   if(!Array.isArray(p.history)) p.history=[];
   if(!Array.isArray(p.dailyCheckins)) p.dailyCheckins=[];
   if(!p.routine) p.routine={};
+  if(!Array.isArray(p.lessons)) p.lessons = Array.isArray(p.routine.lessons) ? p.routine.lessons : [];
+  if(!Array.isArray(p.lessonLogs)) p.lessonLogs = Array.isArray(p.routine.lessonLogs) ? p.routine.lessonLogs : [];
   if(!p.routine.wakeTime) p.routine.wakeTime='09:00';
   if(!p.routine.lunchTime) p.routine.lunchTime='13:00';
   if(!p.routine.dinnerTime) p.routine.dinnerTime='20:00';
@@ -299,6 +301,8 @@ function ensureProfile(p){
   if(!p.reminders.times) p.reminders.times={};
   if(!p.reminders.times.workout) p.reminders.times.workout='12:00';
   if(!p.reminders.water) p.reminders.water={intervalHours:2,start:'09:00',end:'21:00'};
+  p.routine.lessons = p.lessons;
+  p.routine.lessonLogs = p.lessonLogs;
   if(!p.exerciseGoals) p.exerciseGoals={};
   if(!p.nutritionChecks) p.nutritionChecks={};
   if(!Array.isArray(p.quickCoachLogs)) p.quickCoachLogs=[];
@@ -619,6 +623,7 @@ function activeDayInfo(p=profile()){
   (p.history||[]).forEach(h=>{ if(h.date) active.add(dateKey(h.date)); });
   (p.dailyCheckins||[]).forEach(c=>{ if(c.dateKey) active.add(c.dateKey); else if(c.date) active.add(dateKey(c.date)); });
   (p.checkins||[]).forEach(c=>{ if(c.date) active.add(dateKey(c.date)); });
+  (p.lessonLogs||[]).forEach(l=>{ if(l.dateKey) active.add(l.dateKey); else if(l.date) active.add(dateKey(l.date)); });
   Object.values(p.nutritionChecks||{}).forEach(n=>{
     const total=Object.keys(n.meals||{}).length;
     const done=Object.values(n.meals||{}).filter(Boolean).length;
@@ -1565,7 +1570,7 @@ function scrollToSection(id){
 function goNutritionChecklist(){
   setScreen('coach', {scrollTo:'nutritionChecklistCard'});
 }
-function titleFor(s){ return {home:'Início',workouts:'Treinos',progress:'Progresso',checkin:'Check-in',coach:'Nutri & Análise',profile:'Perfil'}[s] || 'Início'; }
+function titleFor(s){ return {home:'Hoje',workouts:'Treinos',lessons:'Aulas',checkin:'Check-in',coach:'Nutri',progress:'Progresso',profile:'Perfil'}[s] || 'Hoje'; }
 function render(){
   const p = profile();
   if(shouldShowOnboarding()){
@@ -1585,7 +1590,7 @@ function render(){
   byId('profileInitial').textContent = (p.name||'?').trim().charAt(0).toUpperCase();
   updateLevelHeader();
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.screen===screen));
-  const map = {home:renderHome, workouts:renderWorkouts, progress:renderProgress, checkin:renderCheckin, coach:renderCoach, profile:renderProfile};
+  const map = {home:renderHome, workouts:renderWorkouts, lessons:renderLessons, checkin:renderCheckin, coach:renderCoach, progress:renderProgress, profile:renderProfile};
   try{
     const view = map[screen] || renderHome;
     byId('content').innerHTML = onlineNoticeHTML() + view() + appFooterHTML();
@@ -2147,6 +2152,7 @@ async function completeVerifiedAccountSession(){
   try{ await upsertCloudProfile(accountProfile.name || user.user_metadata?.display_name || 'Usuário', signupInfo); }catch(e){ console.warn('profile upsert failed', e); }
   try{ await loadLatestPlanFromCloud(); }catch(e){ console.warn('plan load failed', e); }
   try{ await loadLatestDietPlanFromCloud(); }catch(e){ console.warn('diet load failed', e); }
+  try{ await loadLessonsFromCloud({silent:true}); }catch(e){ console.warn('lessons load failed', e); }
   try{ await syncXpEventsToCloud({silent:true}); await loadXpFromCloud({silent:true}); }catch(e){ console.warn('xp sync/load failed', e); }
   save();
   return true;
@@ -2199,8 +2205,12 @@ function applyProfileInfo(info, targetProfile=null){
       wakeTime:normalizeTimeText(info.routine.wakeTime,'09:00'),
       lunchTime:normalizeTimeText(info.routine.lunchTime,'13:00'),
       dinnerTime:normalizeTimeText(info.routine.dinnerTime,'20:00'),
-      workdayDescription:info.routine.workdayDescription||''
+      workdayDescription:info.routine.workdayDescription||'',
+      lessons:Array.isArray(info.routine.lessons)?info.routine.lessons:(p.routine?.lessons||[]),
+      lessonLogs:Array.isArray(info.routine.lessonLogs)?info.routine.lessonLogs:(p.routine?.lessonLogs||[])
     };
+    if(Array.isArray(p.routine.lessons)) p.lessons=p.routine.lessons;
+    if(Array.isArray(p.routine.lessonLogs)) p.lessonLogs=p.routine.lessonLogs;
   }
   if(info.reminders){
     p.reminders={...(p.reminders||{}), ...info.reminders, types:{...(p.reminders?.types||{}), ...(info.reminders.types||{})}, times:{...(p.reminders?.times||{}), ...(info.reminders.times||{})}, water:{...(p.reminders?.water||{}), ...(info.reminders.water||{})}};
@@ -2397,6 +2407,311 @@ async function onboardingLocal(){
 }
 
 function hasWorkoutPlan(p){ return Array.isArray(p?.workouts) && p.workouts.length && Array.isArray(p?.queue) && p.queue.length; }
+
+function dayIndexBR(d=new Date()){
+  return d.getDay();
+}
+function lessonDayLabel(day){
+  return ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][Number(day)||0] || 'Seg';
+}
+function lessonTypeOptions(){
+  return ['Yoga','Pilates','Spinning','Power Local','GAP','Funcional','Alongamento','Dança','Luta','Outra'];
+}
+function lessonIcon(type=''){
+  const s=String(type).toLowerCase();
+  if(s.includes('yoga')) return '🧘';
+  if(s.includes('pilates')) return '🤸';
+  if(s.includes('spinning')) return '🚴';
+  if(s.includes('gap')) return '🍑';
+  if(s.includes('power')) return '💪';
+  if(s.includes('luta')) return '🥊';
+  if(s.includes('dança') || s.includes('danca')) return '💃';
+  if(s.includes('along')) return '🧘';
+  return '⚡';
+}
+function lessonsToday(p=profile()){
+  ensureProfile(p);
+  const d=dayIndexBR();
+  return (p.lessons||[]).filter(a=>Number(a.day)===d).sort((a,b)=>String(a.time||'').localeCompare(String(b.time||'')));
+}
+function lessonDoneToday(p=profile(), lessonId=''){
+  const key=dateKey();
+  return (p.lessonLogs||[]).some(l=>l.lessonId===lessonId && l.dateKey===key);
+}
+function lessonTodayHTML(p=profile()){
+  const list=lessonsToday(p);
+  if(!list.length) return '';
+  return `<section class="card compact-card lessons-today-card"><div class="card-title"><div><h3>Aulas de hoje</h3><p>Atividades guiadas também contam para sua rotina.</p></div><span class="badge orange">Aulas</span></div>
+    <div class="lesson-list mini">${list.map(a=>`<div class="lesson-row"><div><strong>${lessonIcon(a.type)} ${esc(a.type||a.name||'Aula')}</strong><span>${esc(a.time||'--:--')} • ${esc(a.duration||'')} min • ${esc(a.intensity||'Média')}</span></div><button class="btn sm ${lessonDoneToday(p,a.id)?'green':'secondary'}" data-complete-lesson="${esc(a.id)}">${lessonDoneToday(p,a.id)?'Feita':'Concluir'}</button></div>`).join('')}</div>
+  </section>`;
+}
+function renderLessons(){
+  const p=profile(); ensureProfile(p);
+  const today=lessonsToday(p);
+  const logs=[...(p.lessonLogs||[])].slice(-8).reverse();
+  const byDay=[1,2,3,4,5,6,0].map(d=>({day:d, items:(p.lessons||[]).filter(a=>Number(a.day)===d).sort((a,b)=>String(a.time||'').localeCompare(String(b.time||'')))}));
+  return `<section class="card"><div class="card-title"><div><h3>Aulas</h3><p>Yoga, Pilates, Spinning, Power Local, GAP e outras atividades sem complicar.</p></div><button class="btn sm" data-action="add-lesson">Adicionar aula</button></div>
+    ${today.length?`<div class="lesson-list">${today.map(a=>lessonRowHTML(p,a,true)).join('')}</div>`:`<div class="empty"><strong>Nenhuma aula para hoje.</strong><br>Adicione sua grade semanal para aparecer aqui e na tela Hoje.</div>`}
+  </section>
+  <section class="card"><div class="card-title"><div><h3>Grade semanal</h3><p>Organize aulas fixas da academia ou estúdio.</p></div><span class="badge yellow">Sem séries</span></div>
+    <div class="weekly-lessons">${byDay.map(g=>`<div class="lesson-day"><h4>${lessonDayLabel(g.day)}</h4>${g.items.length?g.items.map(a=>lessonRowHTML(p,a,false)).join(''):'<p class="muted">Sem aula</p>'}</div>`).join('')}</div>
+  </section>
+  <section class="card"><div class="card-title"><div><h3>Histórico de aulas</h3><p>Últimas aulas concluídas.</p></div><span class="badge green">Atividade</span></div>
+    ${logs.length?`<div class="history-list">${logs.map(l=>`<div class="history-row"><div><b>${lessonIcon(l.type)} ${esc(l.type||l.name||'Aula')}</b><span>${fmtDate(l.date)} às ${fmtTime(l.date)} • ${esc(l.duration||'')} min • ${esc(l.intensity||'Média')}</span></div><strong>${esc(l.effort||'Feita')}</strong></div>`).join('')}</div>`:'<div class="empty">Nenhuma aula concluída ainda.</div>'}
+  </section>`;
+}
+function lessonRowHTML(p,a,isToday=false){
+  const done=isToday && lessonDoneToday(p,a.id);
+  return `<div class="lesson-row"><div><strong>${lessonIcon(a.type)} ${esc(a.type||a.name||'Aula')}</strong><span>${lessonDayLabel(a.day)} • ${esc(a.time||'--:--')} • ${esc(a.duration||'')} min • ${esc(a.intensity||'Média')}${a.notes?' • '+esc(a.notes):''}</span></div><div class="actions inline-actions">${isToday?`<button class="btn sm ${done?'green':'secondary'}" data-complete-lesson="${esc(a.id)}">${done?'Concluída':'Concluir'}</button>`:''}<button class="btn sm secondary" data-edit-lesson="${esc(a.id)}">Editar</button><button class="btn sm danger" data-delete-lesson="${esc(a.id)}">Excluir</button></div></div>`;
+}
+function openLessonModal(id=''){
+  const p=profile(); ensureProfile(p);
+  const editing=(p.lessons||[]).find(a=>a.id===id) || null;
+  const layer=byId('modalLayer');
+  layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Aulas</p><h2>${editing?'Editar aula':'Adicionar aula'}</h2><p class="muted">Use para Yoga, Pilates, Spinning, GAP, Power Local e outras aulas.</p></div><button class="close" data-close>×</button></div>
+    <div class="form-grid">
+      <div class="field"><label>Tipo</label><select class="select" id="lessonType">${lessonTypeOptions().map(x=>`<option ${editing?.type===x?'selected':''}>${x}</option>`).join('')}</select></div>
+      <div class="field"><label>Nome opcional</label><input class="input" id="lessonName" value="${esc(editing?.name||'')}" placeholder="ex: Pilates solo"></div>
+      <div class="field"><label>Dia</label><select class="select" id="lessonDay">${[1,2,3,4,5,6,0].map(d=>`<option value="${d}" ${Number(editing?.day??dayIndexBR())===d?'selected':''}>${lessonDayLabel(d)}</option>`).join('')}</select></div>
+      <div class="field"><label>Horário</label><input class="input" id="lessonTime" type="time" value="${esc(editing?.time||'19:00')}"></div>
+      <div class="field"><label>Duração</label><input class="input" id="lessonDuration" type="number" value="${esc(editing?.duration||'50')}" placeholder="min"></div>
+      <div class="field"><label>Intensidade</label><select class="select" id="lessonIntensity">${['Leve','Média','Forte'].map(x=>`<option ${editing?.intensity===x?'selected':''}>${x}</option>`).join('')}</select></div>
+      <div class="field" style="grid-column:1/-1"><label>Observação</label><input class="input" id="lessonNotes" value="${esc(editing?.notes||'')}" placeholder="ex: estúdio, professor, foco..."></div>
+    </div>
+    <div class="actions"><button class="btn" data-save-lesson="${esc(id)}">Salvar aula</button><button class="btn secondary" data-close>Cancelar</button></div></div>`;
+  layer.classList.remove('hidden');
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
+  document.querySelector('[data-save-lesson]').onclick=()=>saveLesson(id);
+}
+function saveLesson(id=''){
+  const p=profile(); ensureProfile(p);
+  const obj={
+    id:id || 'lesson_'+Date.now(),
+    type:byId('lessonType').value,
+    name:byId('lessonName').value.trim(),
+    day:Number(byId('lessonDay').value),
+    time:normalizeTimeText(byId('lessonTime').value,'19:00'),
+    duration:String(byId('lessonDuration').value||'50'),
+    intensity:byId('lessonIntensity').value,
+    notes:byId('lessonNotes').value.trim(),
+    updatedAt:nowISO()
+  };
+  const i=p.lessons.findIndex(a=>a.id===obj.id);
+  if(i>=0) p.lessons[i]=obj; else p.lessons.push(obj);
+  p.routine.lessons=p.lessons; p.routine.lessonLogs=p.lessonLogs;
+  save(); if(hasCloudAccount()){ upsertCloudProfile(null).catch(()=>{}); syncLessonScheduleToCloud(obj).then(()=>save()).catch(()=>{}); }
+  closeModal(); toast('Aula salva.'); setScreen('lessons');
+}
+function completeLesson(id){
+  const p=profile(); ensureProfile(p);
+  const a=(p.lessons||[]).find(x=>x.id===id);
+  if(!a) return toast('Aula não encontrada.');
+  if(lessonDoneToday(p,id)) return toast('Essa aula já foi concluída hoje.');
+  const effort=prompt('Como foi a aula? (Leve, Média, Pesada)', a.intensity||'Média') || a.intensity || 'Média';
+  const log={id:'lessonlog_'+Date.now(), lessonId:id, cloudScheduleId:a.cloudScheduleId||null, date:nowISO(), dateKey:dateKey(), type:a.type, name:a.name, duration:a.duration, intensity:a.intensity, effort, notes:a.notes||''};
+  p.lessonLogs.push(log);
+  p.routine.lessons=p.lessons; p.routine.lessonLogs=p.lessonLogs;
+  save(); if(hasCloudAccount()){ upsertCloudProfile(null).catch(()=>{}); syncLessonLogToCloud(log).then(()=>save()).catch(()=>{}); }
+  toast('Aula concluída.'); render();
+}
+function deleteLesson(id){
+  const p=profile(); ensureProfile(p);
+  const a=(p.lessons||[]).find(x=>x.id===id);
+  if(!a) return;
+  if(!confirm(`Excluir a aula ${a.type || a.name || ''}?`)) return;
+  p.lessons=p.lessons.filter(x=>x.id!==id);
+  p.routine.lessons=p.lessons;
+  save(); if(hasCloudAccount()){ upsertCloudProfile(null).catch(()=>{}); deleteLessonScheduleFromCloud(id).catch(()=>{}); }
+  toast('Aula excluída.'); render();
+}
+
+
+function lessonScheduleToCloudRow(userId, a){
+  return {
+    user_id:userId,
+    local_id:a.id || ('lesson_'+Date.now()),
+    class_type:String(a.type || 'Outra'),
+    class_name:a.name || null,
+    weekday:Number(a.day ?? dayIndexBR()),
+    class_time:a.time || null,
+    duration_minutes:parseNumberValue(a.duration),
+    intensity:a.intensity || null,
+    notes:a.notes || null,
+    active:true,
+    updated_at:nowISO()
+  };
+}
+function lessonLogToCloudRow(userId, l){
+  return {
+    user_id:userId,
+    local_id:l.id || ('lessonlog_'+Date.now()),
+    schedule_local_id:l.lessonId || null,
+    schedule_id:l.cloudScheduleId || null,
+    class_type:String(l.type || 'Outra'),
+    class_name:l.name || null,
+    performed_at:l.date || nowISO(),
+    duration_minutes:parseNumberValue(l.duration),
+    intensity:l.intensity || null,
+    effort:l.effort || null,
+    notes:l.notes || null
+  };
+}
+async function syncLessonScheduleToCloud(a){
+  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
+  const user=await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
+  try{
+    const row=lessonScheduleToCloudRow(user.id, a);
+    const { data, error } = await supabaseClient
+      .from('class_schedules')
+      .upsert(row, { onConflict:'user_id,local_id' })
+      .select('id')
+      .single();
+    if(error) throw error;
+    a.cloudScheduleId=data?.id || a.cloudScheduleId || null;
+    a.cloudSynced=true;
+    a.cloudSyncedAt=nowISO();
+    return {ok:true, id:a.cloudScheduleId};
+  }catch(e){
+    console.warn('Erro ao sincronizar aula:', e);
+    return {ok:false, error:e};
+  }
+}
+async function syncLessonLogToCloud(l){
+  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
+  const user=await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
+  try{
+    const p=profile();
+    const schedule=(p.lessons||[]).find(a=>a.id===l.lessonId);
+    if(schedule?.cloudScheduleId) l.cloudScheduleId=schedule.cloudScheduleId;
+    const row=lessonLogToCloudRow(user.id, l);
+    const { data, error } = await supabaseClient
+      .from('class_logs')
+      .upsert(row, { onConflict:'user_id,local_id' })
+      .select('id')
+      .single();
+    if(error) throw error;
+    l.cloudClassLogId=data?.id || l.cloudClassLogId || null;
+    l.cloudSynced=true;
+    l.cloudSyncedAt=nowISO();
+    return {ok:true, id:l.cloudClassLogId};
+  }catch(e){
+    console.warn('Erro ao sincronizar histórico de aula:', e);
+    return {ok:false, error:e};
+  }
+}
+async function deleteLessonScheduleFromCloud(localId){
+  if(!supabaseClient || !hasCloudAccount() || !localId) return {ok:false, reason:'no_account'};
+  const user=await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
+  try{
+    const { error } = await supabaseClient
+      .from('class_schedules')
+      .update({active:false, updated_at:nowISO()})
+      .eq('user_id', user.id)
+      .eq('local_id', localId);
+    if(error) throw error;
+    return {ok:true};
+  }catch(e){
+    console.warn('Erro ao excluir aula da nuvem:', e);
+    return {ok:false, error:e};
+  }
+}
+async function syncLessonsToCloud(opts={}){
+  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
+  const user=await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
+  const p=profile(); ensureProfile(p);
+  let schedules=0, logs=0, failed=0;
+  for(const a of (p.lessons||[])){
+    const r=await syncLessonScheduleToCloud(a);
+    if(r.ok) schedules++; else failed++;
+  }
+  for(const l of (p.lessonLogs||[])){
+    const r=await syncLessonLogToCloud(l);
+    if(r.ok) logs++; else failed++;
+  }
+  p.routine.lessons=p.lessons;
+  p.routine.lessonLogs=p.lessonLogs;
+  save();
+  if(!opts.silent) toast(`Aulas sincronizadas: ${schedules} grade, ${logs} histórico.`);
+  return {ok:failed===0, schedules, logs, failed};
+}
+async function loadLessonsFromCloud(opts={}){
+  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
+  const user=await getCurrentCloudUser();
+  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
+  const p=profile(); ensureProfile(p);
+  try{
+    const { data:schedules, error:sErr } = await supabaseClient
+      .from('class_schedules')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('active', true)
+      .order('weekday', {ascending:true})
+      .order('class_time', {ascending:true});
+    if(sErr) throw sErr;
+    const { data:logs, error:lErr } = await supabaseClient
+      .from('class_logs')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('performed_at', {ascending:false})
+      .limit(250);
+    if(lErr) throw lErr;
+
+    const cloudLessons=(schedules||[]).map(r=>({
+      id:r.local_id || r.id,
+      cloudScheduleId:r.id,
+      type:r.class_type || 'Outra',
+      name:r.class_name || '',
+      day:Number(r.weekday ?? 1),
+      time:r.class_time || '',
+      duration:r.duration_minutes ? String(r.duration_minutes) : '',
+      intensity:r.intensity || 'Média',
+      notes:r.notes || '',
+      updatedAt:r.updated_at || r.created_at || nowISO(),
+      cloudSynced:true,
+      cloudSyncedAt:r.updated_at || r.created_at || nowISO()
+    }));
+    const scheduleIdByCloud=new Map(cloudLessons.map(a=>[a.cloudScheduleId, a.id]));
+    const cloudLogs=(logs||[]).map(r=>({
+      id:r.local_id || r.id,
+      cloudClassLogId:r.id,
+      lessonId:r.schedule_local_id || scheduleIdByCloud.get(r.schedule_id) || r.schedule_id || '',
+      cloudScheduleId:r.schedule_id || null,
+      date:r.performed_at || r.created_at || nowISO(),
+      dateKey:dateKey(r.performed_at || r.created_at || nowISO()),
+      type:r.class_type || 'Outra',
+      name:r.class_name || '',
+      duration:r.duration_minutes ? String(r.duration_minutes) : '',
+      intensity:r.intensity || 'Média',
+      effort:r.effort || 'Feita',
+      notes:r.notes || '',
+      cloudSynced:true,
+      cloudSyncedAt:r.created_at || nowISO()
+    })).reverse();
+
+    const lessonMap=new Map();
+    cloudLessons.forEach(a=>lessonMap.set(a.id, a));
+    (p.lessons||[]).forEach(a=>{ if(!lessonMap.has(a.id)) lessonMap.set(a.id, a); });
+    const logMap=new Map();
+    cloudLogs.forEach(l=>logMap.set(l.id, l));
+    (p.lessonLogs||[]).forEach(l=>{ if(!logMap.has(l.id)) logMap.set(l.id, l); });
+    p.lessons=[...lessonMap.values()].sort((a,b)=>Number(a.day)-Number(b.day) || String(a.time||'').localeCompare(String(b.time||'')));
+    p.lessonLogs=[...logMap.values()].sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+    p.routine.lessons=p.lessons;
+    p.routine.lessonLogs=p.lessonLogs;
+    save();
+    await syncLessonsToCloud({silent:true}).catch(()=>{});
+    if(!opts.silent) toast('Aulas carregadas da nuvem.');
+    return {ok:true, loaded:true, schedules:p.lessons.length, logs:p.lessonLogs.length};
+  }catch(e){
+    console.warn('Erro ao carregar aulas da nuvem:', e);
+    return {ok:false, error:e};
+  }
+}
+
 function renderPlanActions(p){
   const source = p.planMeta?.source || 'pending';
   const needsChoice = source === 'default' && p.planMeta?.needsDefaultChoice;
@@ -2420,6 +2735,7 @@ function renderHome(){
     ${todayMissionHTML(p)}
     ${levelHeaderHTML(p)}
     ${nextCommitmentHTML(p)}
+    ${lessonTodayHTML(p)}
     <section class="card plan-card compact-plan">
       <div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title || 'Aguardando treino inteligente')} • ${esc(p.programLabel || programLabelForProfile(p))} • Ciclo ${p.planMeta?.cycle || Math.max(1, cycles+1)}</p></div><span class="badge ${planBadgeClass}">${planBadge}</span></div>
       <p class="muted">${esc(p.planMeta?.notes || (hasPlan ? 'Use os dados dos treinos para ajustar o próximo ciclo.' : 'Nenhum treino foi carregado ainda. Gere um treino específico com IA ou use o treino padrão.'))}</p>
@@ -2650,6 +2966,9 @@ function bindScreen(){
   document.querySelectorAll('[data-action]').forEach(el=>el.onclick=()=>handleAction(el.dataset.action));
   document.querySelectorAll('[data-meal-check]').forEach(el=>el.onclick=()=>toggleNutritionMeal(Number(el.dataset.mealCheck)));
   document.querySelectorAll('[data-switch-profile]').forEach(el=>el.onclick=()=>{state.activeProfileId=el.dataset.switchProfile; save(); render();});
+  document.querySelectorAll('[data-complete-lesson]').forEach(el=>el.onclick=()=>completeLesson(el.dataset.completeLesson));
+  document.querySelectorAll('[data-edit-lesson]').forEach(el=>el.onclick=()=>openLessonModal(el.dataset.editLesson));
+  document.querySelectorAll('[data-delete-lesson]').forEach(el=>el.onclick=()=>deleteLesson(el.dataset.deleteLesson));
 }
 function handleAction(a){
   if(a==='start-current'){ const w=currentWorkout(); if(!w) return toast('Gere um treino primeiro.'); openWorkout(w.id); }
@@ -2689,6 +3008,7 @@ function handleAction(a){
   if(a==='workout-variants') openWorkoutVariantModal();
   if(a==='open-levels') openLevelModal();
   if(a==='account-switch') openProfileSwitcher();
+  if(a==='add-lesson') openLessonModal();
   if(a==='sync-xp-cloud') syncXpEventsToCloud({silent:false}).then(()=>render());
   if(a==='load-xp-cloud') loadXpFromCloud({silent:false}).then(r=>{ render(); toast(r?.ok?'XP carregado da nuvem.':'Não consegui carregar XP da nuvem.'); });
 }
@@ -3068,16 +3388,14 @@ function exerciseHTML(p,w,e,isCurrent){
       ${repsInputsHTML(e,m)}
       ${commonTail}`;
   const cardioFields = `
+      <div class="field full-field"><label>Tipo de cardio</label><div class="segmented compact-segmented">
+        ${['Bike','Esteira','Escada','Elíptico','Corrida'].map(x=>`<button type="button" class="seg-btn ${(m.cardioType||'Bike')===x?'active':''}" data-cardio-type="${esc(x)}" data-ex-id="${e.id}">${x}</button>`).join('')}
+      </div></div>
       <div class="field"><label>Tempo feito</label><input class="input" data-meta="cardioTime" data-ex-id="${e.id}" value="${esc(m.cardioTime||'')}" placeholder="ex: 20 min"></div>
-      <div class="field"><label>Meta de tempo</label><input class="input" data-meta="cardioTarget" data-ex-id="${e.id}" value="${esc(m.cardioTarget||e.target||'')}" placeholder="ex: 25 min"></div>
       <div class="field"><label>Intensidade</label><select class="select" data-meta="cardioIntensity" data-ex-id="${e.id}">
-        ${['','Leve','Moderado','Forte','HIIT'].map(x=>`<option ${m.cardioIntensity===x?'selected':''}>${x}</option>`).join('')}
+        ${['','Leve','Moderado','Forte'].map(x=>`<option ${m.cardioIntensity===x?'selected':''}>${x}</option>`).join('')}
       </select></div>
-      <div class="field"><label>Cansaço</label><select class="select" data-meta="fatigue" data-ex-id="${e.id}">
-        ${['','Baixo','Médio','Alto','Muito alto'].map(x=>`<option ${m.fatigue===x?'selected':''}>${x}</option>`).join('')}
-      </select></div>
-      <div class="field"><label>Distância opcional</label><input class="input" data-meta="distance" data-ex-id="${e.id}" value="${esc(m.distance||'')}" placeholder="ex: 2,5 km"></div>
-      ${commonTail}`;
+      <div class="field full-field"><label>Observação opcional</label><input class="input" data-meta="cardioNote" data-ex-id="${e.id}" value="${esc(m.cardioNote||m.note||'')}" placeholder="ex: bike moderada, esteira inclinada, escada puxada..."></div>`;
   const coreFields = `
       <div class="field"><label>Tempo/reps feitos</label><input class="input" data-meta="coreDone" data-ex-id="${e.id}" value="${esc(m.coreDone||'')}" placeholder="ex: 3x30s ou 3x15"></div>
       <div class="field"><label>Próxima meta</label><input class="input" data-meta="coreTarget" data-ex-id="${e.id}" value="${esc(m.coreTarget||e.target||'')}" placeholder="ex: 3x40s"></div>
@@ -3129,6 +3447,7 @@ function wireWorkoutModal(){
   document.querySelectorAll('[data-weight]').forEach(inp=>inp.oninput=()=>{ const p=profile(); p.weights[inp.dataset.weight]=inp.value; save(); });
   document.querySelectorAll('[data-rep-ex]').forEach(inp=>inp.oninput=()=>{ normalizeRepsInputsForExercise(inp.dataset.repEx); save(); });
   document.querySelectorAll('[data-meta]').forEach(inp=>inp.oninput=inp.onchange=()=>{ const p=profile(); const id=inp.dataset.exId; if(!p.exerciseMeta[id]) p.exerciseMeta[id]={}; p.exerciseMeta[id][inp.dataset.meta]=inp.value; save(); });
+  document.querySelectorAll('[data-cardio-type]').forEach(btn=>btn.onclick=()=>{ const p=profile(); const id=btn.dataset.exId; if(!p.exerciseMeta[id]) p.exerciseMeta[id]={}; p.exerciseMeta[id].cardioType=btn.dataset.cardioType; save(); refreshWorkoutKeepingScroll(); });
   document.querySelectorAll('[data-toggle-ex]').forEach(b=>b.onclick=()=>toggleDone(b.dataset.toggleEx));
   document.querySelectorAll('[data-skip-ex]').forEach(b=>b.onclick=()=>skipExercise(b.dataset.skipEx));
   document.querySelectorAll('[data-sub-ex]').forEach(b=>b.onclick=()=>openSubstitutionModal(b.dataset.subEx));
@@ -3238,8 +3557,9 @@ function openQuickMenuModal(){
   const items=[
     ['home','🏠','Início','Missão do dia'],
     ['workouts','🏋️','Treinos','Plano e execução'],
-    ['coach','🥗','Nutri','Rotina e checklist'],
+    ['lessons','🧘','Aulas','Yoga, Pilates e coletivas'],
     ['checkin','⚡','Check-in','Diário e físico'],
+    ['coach','🥗','Nutri','Rotina e checklist'],
     ['progress','📈','Progresso','Cargas e histórico'],
     ['profile','👤','Perfil','Conta e segurança']
   ];
@@ -3257,7 +3577,7 @@ function openQuickMenuModal(){
 function openProfileSwitcher(){
   const layer=byId('modalLayer');
   const list=(state.profiles||[]).map(p=>`<div class="profile-option"><div class="workout-left"><div class="avatar-dot">${esc((p.name||'?').charAt(0).toUpperCase())}</div><div><strong>${esc(p.name || 'Perfil')}</strong><div class="small">${p.accountEmail?esc(p.accountEmail)+' • ':''}${levelFromXp(ensureGamification(p).xp).rank.name} • Nv. ${levelFromXp(ensureGamification(p).xp).roman}</div></div></div><button class="btn sm ${p.id===state.activeProfileId?'green':'secondary'}" data-modal-switch-profile="${p.id}">${p.id===state.activeProfileId?'Ativo':'Usar'}</button></div>`).join('');
-  layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Alternar conta</p><h2>Escolha o usuário</h2><p class="muted">Cada conta tem treino, nutri, XP e progresso separados neste aparelho.</p></div><button class="close" data-close>×</button></div><div class="profile-list">${list || '<div class="empty">Nenhum perfil ativo neste aparelho.</div>'}</div><div class="actions"><button class="btn" data-modal-new-profile>Adicionar novo perfil</button></div></div>`;
+  layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Alternar conta</p><h2>Escolha o usuário</h2><p class="muted">Cada conta tem treino, nutri, XP e progresso separados neste aparelho.</p></div><button class="close" data-close>×</button></div><div class="profile-list">${list || '<div class="empty">Nenhum perfil ativo neste aparelho.</div>'}</div><div class="actions"><button class="btn" data-modal-open-profile>Abrir Perfil</button><button class="btn secondary" data-modal-new-profile>Adicionar novo perfil</button></div></div>`;
   layer.classList.remove('hidden');
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
   document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=async()=>{
@@ -3269,6 +3589,7 @@ function openProfileSwitcher(){
     render();
     toast('Conta alternada.');
   });
+  const openProfileBtn=document.querySelector('[data-modal-open-profile]'); if(openProfileBtn) openProfileBtn.onclick=()=>{closeModal(); setScreen('profile');};
   document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();};
 }
 
@@ -3482,12 +3803,13 @@ async function clearAppRuntimeCache(){
 }
 async function syncCurrentDataBeforeLogout(){
   const p=profile();
-  const result={profile:false, workouts:false, plan:false, diet:false};
+  const result={profile:false, workouts:false, plan:false, diet:false, lessons:false};
   if(!hasCloudAccount()) return result;
   try{ await upsertCloudProfile(null); result.profile=true; }catch(e){ console.warn('Falha ao sincronizar perfil antes do logout:', e); }
   try{ await syncLocalHistoryToCloud({silent:true}); result.workouts=true; }catch(e){ console.warn('Falha ao sincronizar histórico antes do logout:', e); }
   try{ await saveCurrentPlanToCloud('logout_sync'); result.plan=true; }catch(e){ console.warn('Falha ao sincronizar plano antes do logout:', e); }
   try{ await saveDietPlanToCloud(p.dietPlan, {silent:true}); result.diet=true; }catch(e){ console.warn('Falha ao sincronizar nutri antes do logout:', e); }
+  try{ await syncLessonsToCloud({silent:true}); result.lessons=true; }catch(e){ console.warn('Falha ao sincronizar aulas antes do logout:', e); }
   return result;
 }
 async function hardResetLocalAppState(){
@@ -3610,7 +3932,7 @@ async function upsertCloudProfile(name=null, sourceInfo=null){
     days_per_week:numOrExisting(p.daysPerWeek || info.daysPerWeek || user.user_metadata?.daysPerWeek || user.user_metadata?.days_per_week, existing?.days_per_week, 5),
     accepted_terms_at:p.acceptedTermsAt || existing?.accepted_terms_at || user.user_metadata?.accepted_terms_at || nowISO(),
     accepted_privacy_at:p.acceptedPrivacyAt || existing?.accepted_privacy_at || user.user_metadata?.accepted_privacy_at || nowISO(),
-    routine:p.routine || info.routine || existing?.routine || {},
+    routine:{...(p.routine || info.routine || existing?.routine || {}), lessons:p.lessons||[], lessonLogs:p.lessonLogs||[]},
     reminders:p.reminders || info.reminders || existing?.reminders || {}
   };
   const { error } = await supabaseClient.from('profiles').upsert(row, { onConflict:'id' });
@@ -3829,6 +4151,7 @@ async function syncLocalHistoryToCloud(opts={}){
   await saveCurrentPlanToCloud('manual_sync').catch(()=>{});
   await saveDietPlanToCloud(p.dietPlan, {silent:true}).catch(()=>{});
   await syncXpEventsToCloud({silent:true}).catch(()=>{});
+  await syncLessonsToCloud({silent:true}).catch(()=>{});
   save(); render();
   if(!opts.silent) toast(`Sincronização: ${sent} enviado(s), ${skipped} já estavam, ${failed} falha(s).`);
   return {ok: failed===0, sent, skipped, failed};
