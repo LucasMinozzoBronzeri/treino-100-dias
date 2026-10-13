@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gym-bronze-v7-3-0-google-steps';
+const CACHE_NAME = 'gym-bronze-v7-4-0-rotina-inteligente';
 const ASSETS = [
   './',
   './index.html',

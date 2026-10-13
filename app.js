@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.3.0';
+const APP_VERSION = '7.4.0';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -402,6 +402,132 @@ function remindersSummary(p=profile()){
     parts.push(`água a cada ${interval}h (${start}-${end})`);
   }
   return parts.length ? parts.join(' • ') : 'sem lembretes ativos';
+}
+
+
+function workoutTimeRecommendation(p=profile()){
+  ensureProfile(p);
+  const r = p.routine || {};
+  const desc = String(r.workdayDescription || '').toLowerCase();
+  const wake = safeTimeMinutes(r.wakeTime, 9*60);
+  const lunch = safeTimeMinutes(r.lunchTime, 13*60);
+  const dinner = safeTimeMinutes(r.dinnerTime, 20*60);
+  let time = safeTimeMinutes(p.reminders?.times?.workout, null);
+  let reason = '';
+  let label = 'horário definido';
+  if(desc.includes('noite')){
+    time = Math.min(21*60, Math.max(dinner + 75, 19*60));
+    label = 'noite';
+    reason = 'Seu dia útil indica noite. Evitei jogar o treino muito cedo e deixei depois do jantar/rotina principal.';
+  }else if(desc.includes('manhã') || desc.includes('manha')){
+    time = Math.max(wake + 60, 7*60);
+    label = 'manhã';
+    reason = 'Seu dia parece funcionar melhor cedo. Sugeri um horário após acordar, com margem para hidratar e comer algo leve.';
+  }else if(desc.includes('almoço') || desc.includes('almoco') || desc.includes('meio dia') || desc.includes('meio-dia')){
+    time = Math.max(wake + 90, lunch - 75);
+    label = 'perto do almoço';
+    reason = 'Seu dia combina com treino perto do almoço. Assim o almoço pode funcionar como pós-treino.';
+  }else if(!time){
+    time = Math.max(wake + 120, lunch - 75);
+    label = 'sugestão automática';
+    reason = 'Usei seu horário de acordar e almoço para encaixar um treino realista antes da primeira refeição grande.';
+  }else{
+    reason = 'Esse é o horário de treino salvo no seu perfil. Se sua rotina mudar, posso sugerir outro encaixe.';
+  }
+  const start = minutesToTime(time, '12:00');
+  const end = minutesToTime(time + 75, '13:15');
+  return {time:start, window:`${start}–${end}`, label, reason, wake:minutesToTime(wake,'09:00'), lunch:minutesToTime(lunch,'13:00'), dinner:minutesToTime(dinner,'20:00')};
+}
+function suggestedWorkoutTimeFromRoutineV74(p=profile()){
+  return workoutTimeRecommendation(p).time;
+}
+function timeToMinutesForToday(t){
+  const m=safeTimeMinutes(t, null);
+  if(m===null || m===undefined) return null;
+  return m;
+}
+function minutesUntilTodayTime(t){
+  const mins=timeToMinutesForToday(t);
+  if(mins===null) return null;
+  const now=new Date();
+  const current=now.getHours()*60+now.getMinutes();
+  return mins-current;
+}
+function formatCommitmentTime(t){ return normalizeTimeText(t,'12:00'); }
+function nextWaterTime(p=profile()){
+  const rem=p.reminders||{}, water=rem.water||{}, r=p.routine||{};
+  if(!rem.types?.water) return null;
+  const start=safeTimeMinutes(water.start || r.wakeTime, safeTimeMinutes(r.wakeTime, 9*60));
+  const end=safeTimeMinutes(water.end, 21*60);
+  const interval=Math.max(1, Math.min(4, Number(water.intervalHours||2)))*60;
+  const now=new Date();
+  const cur=now.getHours()*60+now.getMinutes();
+  if(cur > end) return null;
+  let next=start;
+  while(next < cur) next += interval;
+  if(next > end) return null;
+  return minutesToTime(next, '09:00');
+}
+function nextCommitment(p=profile()){
+  ensureProfile(p);
+  const list=[];
+  const rem=p.reminders||{}, r=p.routine||{};
+  const w=currentWorkout(p);
+  if(rem.types?.workout && w){
+    const t=normalizeTimeText(rem.times?.workout || suggestedWorkoutTimeFromRoutineV74(p), '12:00');
+    const diff=minutesUntilTodayTime(t);
+    if(diff!==null && diff>=-30) list.push({type:'Treino', time:t, title:`Treino ${w.id}`, detail:w.name, icon:'🏋️', diff});
+  }
+  if(rem.types?.meals){
+    [['Almoço', r.lunchTime || '13:00', 'Seguir a rotina alimentar'], ['Jantar', r.dinnerTime || '20:00', 'Fechar o dia sem improvisar']].forEach(([type,t,detail])=>{
+      const tt=normalizeTimeText(t, type==='Almoço'?'13:00':'20:00');
+      const diff=minutesUntilTodayTime(tt);
+      if(diff!==null && diff>=-30) list.push({type, time:tt, title:type, detail, icon:'🥗', diff});
+    });
+  }
+  const meal=nextDietMeal(p);
+  if(meal?.time){
+    const tt=normalizeTimeText(meal.time, '13:00');
+    const diff=minutesUntilTodayTime(tt);
+    if(diff!==null && diff>=-30) list.push({type:'Refeição', time:tt, title:meal.title||'Refeição do plano', detail:meal.text||'Rotina alimentar', icon:'🥗', diff});
+  }
+  const water=nextWaterTime(p);
+  if(water){
+    const diff=minutesUntilTodayTime(water);
+    if(diff!==null && diff>=-5) list.push({type:'Água', time:water, title:'Beber água', detail:`Janela ${normalizeTimeText(rem.water?.start || r.wakeTime || '09:00','09:00')}–${normalizeTimeText(rem.water?.end || '21:00','21:00')}`, icon:'💧', diff});
+  }
+  list.sort((a,b)=>a.diff-b.diff);
+  return list[0] || null;
+}
+function nextCommitmentHTML(p=profile()){
+  const next=nextCommitment(p);
+  const rec=workoutTimeRecommendation(p);
+  if(!next){
+    return `<section class="card compact-card next-commitment-card"><div class="card-title"><div><h3>Próximo compromisso</h3><p>Sem lembretes ativos para hoje.</p></div><span class="badge yellow">Rotina</span></div><p class="muted">Sugestão de treino: ${esc(rec.window)}. Ajuste isso no Perfil se sua rotina mudar.</p><div class="actions"><button class="btn sm secondary" data-action="suggest-workout-time">Sugerir horário</button></div></section>`;
+  }
+  return `<section class="card compact-card next-commitment-card"><div class="card-title"><div><h3>Próximo compromisso</h3><p>${esc(next.icon)} ${esc(next.time)} — ${esc(next.title)}</p></div><span class="badge orange">${esc(next.type)}</span></div><p class="muted">${esc(next.detail || '')}</p><div class="actions"><button class="btn sm secondary" data-action="suggest-workout-time">Sugerir horário de treino</button></div></section>`;
+}
+function openWorkoutTimeSuggestionModal(){
+  saveProfileForm(false);
+  const p=profile();
+  const rec=workoutTimeRecommendation(p);
+  const layer=byId('modalLayer');
+  layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Rotina inteligente</p><h2>Melhor horário de treino</h2><p class="muted">Usei acordar, almoço, jantar e o texto do seu dia útil para sugerir um encaixe realista.</p></div><button class="close" data-close>×</button></div>
+    <section class="card compact-card"><div class="card-title"><div><h3>${esc(rec.window)}</h3><p>${esc(rec.label)}</p></div><span class="badge green">Sugerido</span></div><p>${esc(rec.reason)}</p><div class="grid three"><div class="stat"><strong>${esc(rec.wake)}</strong><span>acorda</span></div><div class="stat"><strong>${esc(rec.lunch)}</strong><span>almoço</span></div><div class="stat"><strong>${esc(rec.dinner)}</strong><span>jantar</span></div></div></section>
+    ${p.routine?.workdayDescription?`<section class="card compact-card"><div class="card-title"><h3>Seu dia útil</h3></div><p class="muted">${esc(p.routine.workdayDescription)}</p></section>`:''}
+    <div class="actions"><button class="btn" data-apply-suggested-workout-time="${esc(rec.time)}">Usar ${esc(rec.time)}</button><button class="btn secondary" data-close>Cancelar</button></div></div>`;
+  layer.classList.remove('hidden');
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
+  document.querySelector('[data-apply-suggested-workout-time]').onclick=()=>{
+    ensureProfile(p);
+    p.reminders.times.workout=rec.time;
+    p.reminders.types.workout=true;
+    p.reminders.enabled=true;
+    save();
+    if(hasCloudAccount()) upsertCloudProfile(null).catch(()=>{});
+    closeModal();
+    toast('Horário de treino atualizado.');
+  };
 }
 
 function workoutById(p,id){ return p.workouts.find(w=>w.id===id); }
@@ -2291,6 +2417,7 @@ function renderHome(){
   return `
     ${todayMissionHTML(p)}
     ${levelHeaderHTML(p)}
+    ${nextCommitmentHTML(p)}
     <section class="card plan-card compact-plan">
       <div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title || 'Aguardando treino inteligente')} • ${esc(p.programLabel || programLabelForProfile(p))} • Ciclo ${p.planMeta?.cycle || Math.max(1, cycles+1)}</p></div><span class="badge ${planBadgeClass}">${planBadge}</span></div>
       <p class="muted">${esc(p.planMeta?.notes || (hasPlan ? 'Use os dados dos treinos para ajustar o próximo ciclo.' : 'Nenhum treino foi carregado ainda. Gere um treino específico com IA ou use o treino padrão.'))}</p>
@@ -2421,7 +2548,7 @@ function remindersPanelHTML(p){
       <div class="field"><label>Água: intervalo</label><select class="select" data-profile-field="reminders.water.intervalHours">
         ${[1,2,3,4].map(n=>`<option value="${n}" ${Number(water.intervalHours||2)===n?'selected':''}>a cada ${n}h</option>`).join('')}
       </select></div>
-      <div class="stat"><strong>${esc(suggestedWorkoutTimeFromRoutine(p)||times.workout||'12:00')}</strong><span>sugestão de treino</span></div>
+      <div class="stat"><strong>${esc(workoutTimeRecommendation(p).window)}</strong><span>sugestão de treino</span></div>
       <div class="field" style="grid-column:1/-1"><label>Quer contar como funciona seu dia útil?</label><textarea data-profile-field="routine.workdayDescription" placeholder="ex: acordo tarde, trabalho no computador, treino perto do almoço...">${esc(routine.workdayDescription||'')}</textarea></div>
     </div>
     <div class="reminder-checks">
@@ -2429,7 +2556,7 @@ function remindersPanelHTML(p){
       <label class="legal-check"><input type="checkbox" data-reminder-type="meals" ${types.meals?'checked':''}> <span>Lembretes de refeição</span></label>
       <label class="legal-check"><input type="checkbox" data-reminder-type="water" ${types.water?'checked':''}> <span>Lembrete de beber água</span></label>
     </div>
-    <p class="muted">Resumo: ${esc(remindersSummary(p))} • Permissão neste aparelho: ${esc(permissionLabel)}.</p>
+    <p class="muted">Resumo: ${esc(remindersSummary(p))} • Permissão neste aparelho: ${esc(permissionLabel)}.</p><div class="actions"><button class="btn sm secondary" data-action="suggest-workout-time">Sugerir melhor horário de treino</button></div>
   </div>`;
 }
 
@@ -2536,6 +2663,7 @@ function handleAction(a){
   if(a==='test-ai') testAIConnection();
   if(a==='request-notifications') requestNotificationsFlow();
   if(a==='test-notification') testReminderNotification();
+  if(a==='suggest-workout-time') openWorkoutTimeSuggestionModal();
   if(a==='cloud-login') cloudLogin();
   if(a==='cloud-signup') cloudSignup();
   if(a==='cloud-logout') cloudLogout();
@@ -2631,7 +2759,7 @@ function saveProfileForm(doRender=true){
   });
   save();
   if(hasCloudAccount()) upsertCloudProfile(null).catch(()=>{});
-  toast('Perfil salvo.'); if(doRender) render();
+  if(doRender){ toast('Perfil salvo.'); render(); }
 }
 async function createProfileFlow(){
   if(supabaseClient){
@@ -2898,20 +3026,20 @@ function skipExercise(id){
 function closeModal(){ byId('modalLayer').classList.add('hidden'); byId('modalLayer').innerHTML=''; render(); }
 function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toast(`Bloqueado. O próximo treino correto é ${p.queue[0]}.`); const w=workoutById(p,id); const dayExercises=workoutExercisesForToday(w,p); const variant=currentVariant(p); const doneCount=dayExercises.filter(e=>p.tempDone[e.id]).length; const skippedCount=dayExercises.filter(e=>p.tempStatus[e.id]==='skipped').length;
   if(!confirm(`Finalizar o treino ${id}?\n\nConcluídos: ${doneCount}\nPulados: ${skippedCount}`)) return;
-  const weights={}, status={}, metaSnap={};
+  const weights={}, status={}, metaSnap={}, substitutions=[];
   dayExercises.forEach(e=>{
     if(p.weights[e.id]) weights[e.id]=p.weights[e.id];
     if(p.tempStatus[e.id]) status[e.id]=p.tempStatus[e.id];
     const metaObj={...(p.exerciseMeta[e.id]||{}), ...(p.tempTimes?.[e.id]||{})};
     metaObj.exerciseName=e.name;
-    if(e.temporarySubstitution){ metaObj.originalExerciseName=e.originalName||''; metaObj.substituteReason=e.substituteReason||'Máquina ocupada'; }
+    if(e.temporarySubstitution){ metaObj.originalExerciseName=e.originalName||''; metaObj.substituteReason=e.substituteReason||'Máquina ocupada'; substitutions.push({exerciseId:e.id, originalName:e.originalName||'', substituteName:e.name, reason:e.substituteReason||'Máquina ocupada', createdAt:nowISO()}); }
     if(Object.keys(metaObj).length) metaSnap[e.id]=metaObj;
   });
   const startedAt = p.activeWorkoutSession?.id===id ? p.activeWorkoutSession.startAt : nowISO();
   const finishedAt = nowISO();
   const durationMinutes = Math.max(0, Math.round((new Date(finishedAt)-new Date(startedAt))/60000));
   const score = Math.max(0, Math.round(((doneCount + skippedCount*.35) / Math.max(1, dayExercises.length)) * 100));
-  const record = {id:'h_'+Date.now(), date:finishedAt, startedAt, finishedAt, durationMinutes, workoutId:id, workoutName:w.name, workoutVariant:variant, workoutAdjustment:currentAdjustment(p), doneCount, skippedCount, score, weights, status, meta:metaSnap};
+  const record = {id:'h_'+Date.now(), date:finishedAt, startedAt, finishedAt, durationMinutes, workoutId:id, workoutName:w.name, workoutVariant:variant, workoutAdjustment:currentAdjustment(p), substitutions, doneCount, skippedCount, score, weights, status, meta:metaSnap};
   const xpInfo = awardWorkoutXP(p,w,record);
   if(aiConfigured(p) && p.ai.autoWorkoutReport && canUseOnlineAI()) record.aiReportStatus='pending';
   else if(p.ai.autoWorkoutReport && isOffline()) record.aiReportError='IA pausada: você estava offline.';
@@ -3550,12 +3678,12 @@ function buildPlanAIPayload(mode='initial', extra={}){
     mode,
     cycleChangeRequest: extra.cycleChangeRequest || '',
     profile:{name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
-    routine:{...(p.routine||{}), summary:routineSummary(p), suggestedWorkoutTime:suggestedWorkoutTimeFromRoutine(p)},
+    routine:{...(p.routine||{}), summary:routineSummary(p), suggestedWorkoutTime:suggestedWorkoutTimeFromRoutineV74(p), workoutRecommendation:workoutTimeRecommendation(p)},
     reminders:p.reminders || {},
     planRules:{daysPerWeek:clampTrainingDays(p.daysPerWeek), level:normalizeExperienceLabel(p.experience), programWeeks:programWeeksForExperience(p.experience), targetWorkouts:targetWorkoutsForProfile(p), programLabel:programLabelForProfile(p), allowedWorkoutIds:WORKOUT_LETTERS.slice(0, clampTrainingDays(p.daysPerWeek))},
     currentPlan:{title:p.planMeta?.title, cycle:p.planMeta?.cycle, source:p.planMeta?.source, workouts:p.planMeta?.source==='ai'?p.workouts:[]},
     progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, currentCycleNumber(p)+1)},
-    recentHistory:p.history.slice(-12).map(h=>({date:h.date, workoutId:h.workoutId, workoutName:h.workoutName, score:h.score, doneCount:h.doneCount, skippedCount:h.skippedCount, weights:h.weights, status:h.status, meta:h.meta, aiReport:h.aiReport}))
+    recentHistory:p.history.slice(-12).map(h=>({date:h.date, workoutId:h.workoutId, workoutName:h.workoutName, score:h.score, doneCount:h.doneCount, skippedCount:h.skippedCount, weights:h.weights, status:h.status, meta:h.meta, substitutions:h.substitutions||[], aiReport:h.aiReport}))
   };
 }
 function normalizeAIPlan(plan, mode='initial'){
@@ -3745,15 +3873,16 @@ function buildDietAIPayload(){
   return {
     kind:'diet-plan',
     profile:{name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
-    routine:{...(p.routine||{}), summary:routineSummary(p), suggestedWorkoutTime:suggestedWorkoutTimeFromRoutine(p)},
+    routine:{...(p.routine||{}), summary:routineSummary(p), suggestedWorkoutTime:suggestedWorkoutTimeFromRoutineV74(p), workoutRecommendation:workoutTimeRecommendation(p)},
     reminders:p.reminders || {},
+    dietInstructions:{priority:'Respeitar a rotina real do usuário antes de sugerir horários.', rules:['Não sugerir café da manhã antes do horário de acordar.', 'Distribuir refeições em torno de almoço e jantar informados.', 'Se houver horário de treino, colocar pré-treino antes e pós-treino/refeição principal depois.', 'Se a descrição do dia útil indicar restrição de horário, adaptar a rotina a ela.']},
     currentPlan:{title:p.planMeta?.title, source:p.planMeta?.source, workouts:p.workouts},
     progress:{completedWorkouts:p.progress, target:p.target, cycle:Math.max(1, currentCycleNumber(p)+1)},
     todayReadiness:dailyCheckinToday(p),
     recentDailyCheckins:recentDailyCheckins(p,7),
     nutritionToday:nutritionStats(p),
     recentNutrition:recentNutritionStats(p,7),
-    recentHistory:p.history.slice(-10).map(h=>({date:h.date, startedAt:h.startedAt, finishedAt:h.finishedAt || h.date, durationMinutes:h.durationMinutes, workoutName:h.workoutName, doneCount:h.doneCount, skippedCount:h.skippedCount, score:h.score, weights:h.weights, meta:h.meta}))
+    recentHistory:p.history.slice(-10).map(h=>({date:h.date, startedAt:h.startedAt, finishedAt:h.finishedAt || h.date, durationMinutes:h.durationMinutes, workoutName:h.workoutName, doneCount:h.doneCount, skippedCount:h.skippedCount, score:h.score, weights:h.weights, meta:h.meta, substitutions:h.substitutions||[]}))
   };
 }
 async function callDietAI(){
