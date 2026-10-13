@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.5.0';
+const APP_VERSION = '7.5.1';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -2859,13 +2859,52 @@ function weightUnitText(v){
   const m=s.match(/[a-zA-ZÀ-ÿ%]+/g);
   return m ? m.join('') : 'kg';
 }
-function bumpWeightText(weight, pct=0.05){
+function exerciseProgressionType(e={}){
+  const s=normalizedExerciseName((e?.type||'')+' '+(e?.name||'')+' '+(e?.originalName||''));
+  if(/halter|dumbbell/.test(s)) return 'dumbbell';
+  if(/maquina|machine|cabo|crossover|pulley|peck|fly|leg press|leg|hack|extensora|flexora|abdutora|adutora|panturrilha sentado|smith/.test(s)) return 'machine';
+  if(/barra|barbell|supino reto|agachamento livre|levantamento terra|stiff/.test(s)) return 'barbell';
+  return 'default';
+}
+function nextAvailableWeightNumber(n, type='default'){
+  if(!Number.isFinite(n)) return null;
+  if(type==='dumbbell'){
+    if(n < 10) return Math.ceil(n + 0.0001); // halteres leves: sobe de 1 em 1 até 10 kg
+    let next=Math.ceil((n + 0.0001)/2)*2; // depois, padrão comum de 2 em 2 kg
+    if(next<=n) next+=2;
+    return next;
+  }
+  if(type==='machine'){
+    if(n < 20){
+      const next=Math.ceil((n + 0.0001)/4)*4; // placas leves: 4 em 4 até 20 kg
+      return Math.min(20, next<=n ? next+4 : next);
+    }
+    let next=Math.ceil((n + 0.0001)/5)*5; // depois, 5 em 5 kg
+    if(next<=n) next+=5;
+    return next;
+  }
+  if(type==='barbell'){
+    const step=n<60 ? 2.5 : 5;
+    let next=Math.ceil((n + 0.0001)/step)*step;
+    if(next<=n) next+=step;
+    return next;
+  }
+  const step=n<20 ? 1 : n<60 ? 2 : 5;
+  let next=Math.ceil((n + 0.0001)/step)*step;
+  if(next<=n) next+=step;
+  return next;
+}
+function bumpWeightText(weight, pct=0.05, e={}){
   const n=numberFromWeightText(weight);
   if(n===null) return '';
   const unit=weightUnitText(weight);
-  const step=n<20 ? 1 : n<60 ? 2 : 5;
-  const bumped=Math.max(n+step, Math.round((n*(1+pct))/step)*step);
-  return `${String(bumped).replace('.', ',')} ${unit}`;
+  const type=exerciseProgressionType(e);
+  const byType=nextAvailableWeightNumber(n, type);
+  const stepTarget=n*(1+pct);
+  const candidate=byType===null ? null : Math.max(byType, nextAvailableWeightNumber(stepTarget, type) || byType);
+  if(candidate===null) return '';
+  const rounded=Number.isInteger(candidate) ? String(candidate) : String(candidate).replace('.', ',');
+  return `${rounded} ${unit}`;
 }
 function goalForExerciseFromRecord(e={}, record={}){
   const meta=record.meta?.[e.id] || {};
@@ -2895,9 +2934,9 @@ function goalForExerciseFromRecord(e={}, record={}){
     suggestion=`Manter ${weight || 'a carga atual'} até fechar melhor as reps.`;
     reason=reps.length ? `Você fez ${reps.join('/')} em uma meta ${cfg.sets}x${cfg.reps}.` : 'O treino foi marcado como muito pesado.';
   }else if(completedRatio >= 1 && minRep >= cfg.reps && (easy || !/pesada/.test(diff))){
-    const next=bumpWeightText(weight);
+    const next=bumpWeightText(weight, 0.05, e);
     suggestedWeight=next || weight;
-    suggestion=next ? `Tentar ${next} mantendo pelo menos ${cfg.sets}x${Math.max(8, cfg.reps-2)}.` : `Tentar subir levemente a carga mantendo ${cfg.sets}x${Math.max(8, cfg.reps-2)}.`;
+    suggestion=next ? `Tentar ${next} ou a próxima carga disponível, mantendo pelo menos ${cfg.sets}x${Math.max(8, cfg.reps-2)}.` : `Tentar subir para a próxima carga disponível mantendo ${cfg.sets}x${Math.max(8, cfg.reps-2)}.`;
     reason=reps.length ? `Você fechou ${reps.join('/')} sem sinal forte de dor.` : 'Você concluiu a meta planejada.';
   }else if(completedRatio >= .9){
     suggestion=`Manter ${weight || 'a carga atual'} e buscar fechar ${cfg.sets}x${cfg.reps}.`;
