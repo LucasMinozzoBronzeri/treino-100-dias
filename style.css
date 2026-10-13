@@ -1182,3 +1182,7 @@ body{background:radial-gradient(circle at 80% -10%, rgba(201,119,34,.20), transp
 .section-head.compact h3{margin:0;font-size:18px}
 .section-head.compact p{margin:4px 0 0;color:var(--muted);font-size:13px}
 @media (max-width:620px){.signup-step-dots{font-size:11px}.signup-step-dot{gap:4px}.signup-step-dot:before{width:8px;height:8px}}
+
+/* v7.5 - reps por série e meta sugerida */
+.reps-field{grid-column:1/-1}.reps-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.rep-input{text-align:center;font-weight:900}.reps-field small{color:var(--muted);font-size:11px;line-height:1.35}.suggested-goal{margin-top:7px;font-size:11px;line-height:1.35;color:#f4c37e;font-weight:800;background:rgba(255,122,0,.08);border:1px solid rgba(255,122,0,.18);border-radius:12px;padding:7px 9px}.suggested-goal b{color:#ffd9a8}.suggested-goal span{font-size:10px;margin-left:6px;border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:2px 6px;color:var(--soft)}
+@media(max-width:560px){.reps-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.rep-input{padding:10px 6px}}

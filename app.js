@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.4.0';
+const APP_VERSION = '7.5.0';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -239,7 +239,7 @@ function newProfile(name='Novo perfil'){
   const p = {
     id: 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2), name, sex:'', age:'', height:'', weight:'', goal:'', focus:'', notes:'', experience:'Iniciante', daysPerWeek:'5', dietPlan:null,
     queue: [], progress: 0, target: 20, workouts: [], programWeeks:4, programLabel:'4 semanas • 20 treinos', planMeta:{source:'pending', cycle:1, title:'Aguardando treino inteligente', notes:'Preencha o perfil e gere um treino específico antes de começar.'},
-    weights:{}, exerciseMeta:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], ai:{autoWorkoutReport:true}, createdAt: nowISO()
+    weights:{}, exerciseMeta:{}, exerciseGoals:{}, tempDone:{}, tempStatus:{}, history:[], pendingAcademy:[], checkins:[], bio:[], ai:{autoWorkoutReport:true}, createdAt: nowISO()
   };
   applyProgramDuration(p);
   return p;
@@ -299,6 +299,7 @@ function ensureProfile(p){
   if(!p.reminders.times) p.reminders.times={};
   if(!p.reminders.times.workout) p.reminders.times.workout='12:00';
   if(!p.reminders.water) p.reminders.water={intervalHours:2,start:'09:00',end:'21:00'};
+  if(!p.exerciseGoals) p.exerciseGoals={};
   if(!p.nutritionChecks) p.nutritionChecks={};
   if(!Array.isArray(p.quickCoachLogs)) p.quickCoachLogs=[];
   if(!('activeWorkoutAdjustment' in p)) p.activeWorkoutAdjustment=null;
@@ -998,6 +999,7 @@ function mealKey(m,i){
   return 'm_'+i+'_'+String(m.time||'').replace(/\W+/g,'').slice(0,8)+'_'+String(m.title||'ref').toLowerCase().replace(/\W+/g,'').slice(0,16);
 }
 function nutritionStateForDay(p=profile(), key=nutritionDayKey()){
+  if(!p.exerciseGoals) p.exerciseGoals={};
   if(!p.nutritionChecks) p.nutritionChecks={};
   if(!p.nutritionChecks[key]) p.nutritionChecks[key]={dateKey:key, updatedAt:null, meals:{}};
   return p.nutritionChecks[key];
@@ -2790,15 +2792,148 @@ function latestExerciseLoad(p=profile(), e={}){
   for(const h of list){
     const weights=h.weights||{};
     const meta=h.meta||{};
-    if(weights[wantedId]) return {weight:weights[wantedId], date:h.date, workoutName:h.workoutName};
+    if(weights[wantedId]) return {weight:weights[wantedId], reps:formatRepsPerSet(meta[wantedId]||{}), date:h.date, workoutName:h.workoutName};
     const candidates=Object.keys(weights);
     for(const id of candidates){
       const maybeName=normalizedExerciseName(meta[id]?.exerciseName || id);
-      if(maybeName && maybeName===wantedName) return {weight:weights[id], date:h.date, workoutName:h.workoutName};
+      if(maybeName && maybeName===wantedName) return {weight:weights[id], reps:formatRepsPerSet(meta[id]||{}), date:h.date, workoutName:h.workoutName};
     }
   }
   return null;
 }
+
+function exerciseGoalKey(e={}){
+  return String(e.id || normalizedExerciseName(e.originalName || e.name || ''));
+}
+function exerciseGoalNameKey(e={}){
+  return 'name:' + normalizedExerciseName(e.originalName || e.name || '');
+}
+function currentExerciseGoal(p=profile(), e={}){
+  const goals=p?.exerciseGoals || {};
+  return goals[exerciseGoalKey(e)] || goals[exerciseGoalNameKey(e)] || null;
+}
+function parseTargetSetsReps(target=''){
+  const raw=String(target||'').toLowerCase();
+  let m=raw.match(/(\d+)\s*[x×]\s*(\d+)/i);
+  if(m) return {sets:Number(m[1])||4, reps:Number(m[2])||12};
+  m=raw.match(/(\d+)\s*s[ée]ries?.*?(\d+)\s*rep/i);
+  if(m) return {sets:Number(m[1])||4, reps:Number(m[2])||12};
+  m=raw.match(/(\d+)\s*rep/i);
+  if(m) return {sets:4, reps:Number(m[1])||12};
+  return {sets:4, reps:12};
+}
+function repsArrayFromMeta(e={}, meta={}){
+  const cfg=parseTargetSetsReps(e.target || meta.target || '4x12');
+  const fromArray=Array.isArray(meta.repsPerSet) ? meta.repsPerSet : null;
+  if(fromArray && fromArray.length) return fromArray.slice(0,8).map(v=>String(v??'')).filter(v=>v!=='' || fromArray.length<=cfg.sets);
+  const str=String(meta.reps || meta.repsDone || '').trim();
+  if(str){
+    const nums=str.split(/[\/|,;\s]+/).map(x=>parseInt(x,10)).filter(n=>Number.isFinite(n));
+    if(nums.length) return nums.slice(0,8).map(String);
+  }
+  return Array.from({length:Math.max(1, Math.min(6,cfg.sets))}, ()=>String(cfg.reps));
+}
+function repsInputsHTML(e={}, meta={}){
+  const reps=repsArrayFromMeta(e, meta);
+  return `<div class="field full-field reps-field"><label>Reps feitas por série</label><div class="reps-grid" data-reps-wrap="${esc(e.id)}">${reps.map((r,i)=>`<input class="input rep-input" inputmode="numeric" pattern="[0-9]*" data-rep-ex="${esc(e.id)}" data-rep-idx="${i}" value="${esc(r)}" aria-label="Série ${i+1}">`).join('')}</div><small>Ex.: 12 / 12 / 10 / 8. Isso ajuda o Gym Bronze a sugerir a próxima meta.</small></div>`;
+}
+function normalizeRepsInputsForExercise(id){
+  const p=profile();
+  if(!p.exerciseMeta[id]) p.exerciseMeta[id]={};
+  const reps=[...document.querySelectorAll(`[data-rep-ex="${CSS.escape(id)}"]`)].sort((a,b)=>Number(a.dataset.repIdx)-Number(b.dataset.repIdx)).map(inp=>parseInt(inp.value,10)).filter(n=>Number.isFinite(n) && n>=0 && n<=200);
+  p.exerciseMeta[id].repsPerSet=reps;
+  p.exerciseMeta[id].reps=reps.join('/');
+  p.exerciseMeta[id].sets=reps.length ? reps.length : '';
+  p.exerciseMeta[id].repsDoneAvg=reps.length ? Math.round(reps.reduce((a,b)=>a+b,0)/reps.length) : '';
+}
+function formatRepsPerSet(meta={}){
+  const reps=Array.isArray(meta.repsPerSet) ? meta.repsPerSet : String(meta.reps||'').split(/[\/|,;\s]+/).map(x=>parseInt(x,10)).filter(Number.isFinite);
+  return reps.length ? reps.join('/') : '';
+}
+function numberFromWeightText(v){
+  const n=parseFloat(String(v||'').replace(',', '.').replace(/[^0-9.\-]/g,''));
+  return Number.isFinite(n) ? n : null;
+}
+function weightUnitText(v){
+  const s=String(v||'');
+  const m=s.match(/[a-zA-ZÀ-ÿ%]+/g);
+  return m ? m.join('') : 'kg';
+}
+function bumpWeightText(weight, pct=0.05){
+  const n=numberFromWeightText(weight);
+  if(n===null) return '';
+  const unit=weightUnitText(weight);
+  const step=n<20 ? 1 : n<60 ? 2 : 5;
+  const bumped=Math.max(n+step, Math.round((n*(1+pct))/step)*step);
+  return `${String(bumped).replace('.', ',')} ${unit}`;
+}
+function goalForExerciseFromRecord(e={}, record={}){
+  const meta=record.meta?.[e.id] || {};
+  const weight=record.weights?.[e.id] || '';
+  const reps=Array.isArray(meta.repsPerSet) ? meta.repsPerSet.map(Number).filter(Number.isFinite) : [];
+  const cfg=parseTargetSetsReps(e.target||'4x12');
+  const totalTarget=cfg.sets*cfg.reps;
+  const totalDone=reps.reduce((a,b)=>a+b,0);
+  const completedRatio=totalTarget ? totalDone/totalTarget : 0;
+  const minRep=reps.length ? Math.min(...reps) : 0;
+  const diff=String(meta.difficulty||'').toLowerCase();
+  const pain=String(meta.pain||'').toLowerCase();
+  const hasPain=/m[eé]dia|forte/.test(pain);
+  const veryHard=/muito/.test(diff);
+  const easy=/f[aá]cil/.test(diff);
+  let suggestion='Manter a carga e repetir a meta planejada.';
+  let reason='Ainda falta histórico suficiente para uma sugestão mais precisa.';
+  let suggestedWeight=weight;
+  let repsTarget=e.target || `${cfg.sets}x${cfg.reps}`;
+  if(record.status?.[e.id]==='skipped'){
+    suggestion='Retomar este exercício com calma no próximo treino.';
+    reason='Ele foi pulado neste treino.';
+  }else if(hasPain){
+    suggestion=`Manter ${weight || 'a carga atual'} ou reduzir levemente e priorizar execução.`;
+    reason='Você marcou dor/desconforto relevante.';
+  }else if(veryHard || completedRatio < .75){
+    suggestion=`Manter ${weight || 'a carga atual'} até fechar melhor as reps.`;
+    reason=reps.length ? `Você fez ${reps.join('/')} em uma meta ${cfg.sets}x${cfg.reps}.` : 'O treino foi marcado como muito pesado.';
+  }else if(completedRatio >= 1 && minRep >= cfg.reps && (easy || !/pesada/.test(diff))){
+    const next=bumpWeightText(weight);
+    suggestedWeight=next || weight;
+    suggestion=next ? `Tentar ${next} mantendo pelo menos ${cfg.sets}x${Math.max(8, cfg.reps-2)}.` : `Tentar subir levemente a carga mantendo ${cfg.sets}x${Math.max(8, cfg.reps-2)}.`;
+    reason=reps.length ? `Você fechou ${reps.join('/')} sem sinal forte de dor.` : 'Você concluiu a meta planejada.';
+  }else if(completedRatio >= .9){
+    suggestion=`Manter ${weight || 'a carga atual'} e buscar fechar ${cfg.sets}x${cfg.reps}.`;
+    reason=reps.length ? `Você chegou perto da meta: ${reps.join('/')}.` : 'Você ficou perto da meta.';
+  }else{
+    suggestion=`Manter ${weight || 'a carga atual'} e tentar melhorar o total de reps.`;
+    reason=reps.length ? `Resultado registrado: ${reps.join('/')} para meta ${cfg.sets}x${cfg.reps}.` : 'Faltam reps registradas por série.';
+  }
+  return {exerciseId:e.id, exerciseName:e.name, workoutId:record.workoutId, createdAt:nowISO(), source:'auto', lastWeight:weight, repsPerSet:reps, target:e.target||'', suggestedWeight, repsTarget, suggestion, reason, validFor:'next_workout'};
+}
+function saveExerciseGoal(p,e,goal){
+  if(!p.exerciseGoals) p.exerciseGoals={};
+  p.exerciseGoals[exerciseGoalKey(e)] = goal;
+  p.exerciseGoals[exerciseGoalNameKey(e)] = goal;
+}
+function updateExerciseGoalsFromWorkout(p,w,record,dayExercises=[]){
+  (dayExercises||[]).forEach(e=>{
+    const kind=exerciseKind(e);
+    if(kind==='mobility') return;
+    const goal=goalForExerciseFromRecord(e,record);
+    saveExerciseGoal(p,e,goal);
+  });
+}
+function applyAiExerciseGoalsFromReport(p,h,w){
+  const items=h?.aiReport?.exerciseGoals;
+  if(!Array.isArray(items) || !items.length) return false;
+  const exercises=(w?.exercises || []).concat(workoutExercisesForToday(w,p)||[]);
+  items.forEach(item=>{
+    const target=exercises.find(e=>e.id===item.exerciseId) || exercises.find(e=>normalizedExerciseName(e.name)===normalizedExerciseName(item.exerciseName));
+    if(!target) return;
+    const local=currentExerciseGoal(p,target) || {};
+    saveExerciseGoal(p,target,{...local, ...item, exerciseId:target.id, exerciseName:target.name, source:'ia', createdAt:nowISO(), validFor:'next_workout'});
+  });
+  return true;
+}
+
 function substituteOptionsForExercise(e={}){
   const s=normalizedExerciseName((e.originalName||e.name||'')+' '+(e.type||''));
   const opt=(arr)=>arr.map((name,i)=>({id:'sub_'+i+'_'+Date.now(), name, target:e.target||'3-4 séries', type:e.type||'alternativa'}));
@@ -2888,9 +3023,10 @@ function exerciseHTML(p,w,e,isCurrent){
         ${['','Não','Leve','Média','Forte'].map(x=>`<option ${m.pain===x?'selected':''}>${x}</option>`).join('')}
       </select></div>
       <div class="field full-field"><label>Observação</label><input class="input" data-meta="note" data-ex-id="${e.id}" value="${esc(m.note||'')}" placeholder="ex: cansei muito, dor no pé, ajustar ritmo..."></div>`;
+  const goal=currentExerciseGoal(p,e);
   const strengthFields = `
-      <div class="field"><label>Carga atual</label><input class="input" data-weight="${e.id}" value="${esc(weight)}" placeholder="ex: 40 kg"></div>
-      <div class="field"><label>Próxima meta</label><input class="input" data-meta="targetWeight" data-ex-id="${e.id}" value="${esc(m.targetWeight||'')}" placeholder="ex: 45 kg"></div>
+      <div class="field"><label>Carga usada</label><input class="input" data-weight="${e.id}" value="${esc(weight)}" placeholder="ex: 40 kg"></div>
+      ${repsInputsHTML(e,m)}
       ${commonTail}`;
   const cardioFields = `
       <div class="field"><label>Tempo feito</label><input class="input" data-meta="cardioTime" data-ex-id="${e.id}" value="${esc(m.cardioTime||'')}" placeholder="ex: 20 min"></div>
@@ -2915,7 +3051,7 @@ function exerciseHTML(p,w,e,isCurrent){
   const kindLabel = kind==='cardio' ? 'cardio' : kind==='core' ? 'core' : kind==='mobility' ? 'mobilidade' : (e.type||'força');
   return `<div class="exercise ${done?'done':''} ${status==='skipped'?'skipped':''} ${isQuickPriority?'quick-priority-ex':''}" data-exercise-card="${e.id}">
     <div class="exercise-top">
-      <div><h4>${esc(e.name)}</h4><div class="small">${esc(kindLabel)} • meta ${esc(e.target||'4x12')}${statusTime ? ' • '+esc(statusTime) : ''}</div>${lastLoad?`<div class="last-load">Última carga: <b>${esc(lastLoad.weight)}</b> • ${esc(fmtDate(lastLoad.date))}</div>`:''}${e.temporarySubstitution?`<div class="last-load orange">Hoje no lugar de: <b>${esc(e.originalName||'exercício original')}</b></div>`:''}</div>
+      <div><h4>${esc(e.name)}</h4><div class="small">${esc(kindLabel)} • meta ${esc(e.target||'4x12')}${statusTime ? ' • '+esc(statusTime) : ''}</div>${lastLoad?`<div class="last-load">Última carga: <b>${esc(lastLoad.weight)}</b> • ${lastLoad.reps?`reps ${esc(lastLoad.reps)} • `:''}${esc(fmtDate(lastLoad.date))}</div>`:''}${goal?`<div class="suggested-goal">🎯 Meta sugerida: <b>${esc(goal.suggestion||'')}</b>${goal.source==='ia'?' <span>IA</span>':''}</div>`:''}${e.temporarySubstitution?`<div class="last-load orange">Hoje no lugar de: <b>${esc(e.originalName||'exercício original')}</b></div>`:''}</div>
       <span class="badge ${done?'green':status==='skipped'?'yellow':isQuickPriority?'orange':''}">${done?'Concluído':status==='skipped'?'Pulado':isQuickPriority?'Prioridade':isCurrent?'Pendente':'Consulta'}</span>
     </div>
     <div class="exercise-controls ${kind==='cardio'?'cardio-controls':''}">
@@ -2952,6 +3088,7 @@ function openWorkout(id){
 function wireWorkoutModal(){
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
   document.querySelectorAll('[data-weight]').forEach(inp=>inp.oninput=()=>{ const p=profile(); p.weights[inp.dataset.weight]=inp.value; save(); });
+  document.querySelectorAll('[data-rep-ex]').forEach(inp=>inp.oninput=()=>{ normalizeRepsInputsForExercise(inp.dataset.repEx); save(); });
   document.querySelectorAll('[data-meta]').forEach(inp=>inp.oninput=inp.onchange=()=>{ const p=profile(); const id=inp.dataset.exId; if(!p.exerciseMeta[id]) p.exerciseMeta[id]={}; p.exerciseMeta[id][inp.dataset.meta]=inp.value; save(); });
   document.querySelectorAll('[data-toggle-ex]').forEach(b=>b.onclick=()=>toggleDone(b.dataset.toggleEx));
   document.querySelectorAll('[data-skip-ex]').forEach(b=>b.onclick=()=>skipExercise(b.dataset.skipEx));
@@ -3031,6 +3168,7 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
     if(p.weights[e.id]) weights[e.id]=p.weights[e.id];
     if(p.tempStatus[e.id]) status[e.id]=p.tempStatus[e.id];
     const metaObj={...(p.exerciseMeta[e.id]||{}), ...(p.tempTimes?.[e.id]||{})};
+    if(Array.isArray(metaObj.repsPerSet)){ metaObj.reps = metaObj.repsPerSet.join('/'); metaObj.sets = metaObj.repsPerSet.length; metaObj.repsDoneAvg = metaObj.repsPerSet.length ? Math.round(metaObj.repsPerSet.reduce((a,b)=>Number(a)+Number(b),0)/metaObj.repsPerSet.length) : ''; }
     metaObj.exerciseName=e.name;
     if(e.temporarySubstitution){ metaObj.originalExerciseName=e.originalName||''; metaObj.substituteReason=e.substituteReason||'Máquina ocupada'; substitutions.push({exerciseId:e.id, originalName:e.originalName||'', substituteName:e.name, reason:e.substituteReason||'Máquina ocupada', createdAt:nowISO()}); }
     if(Object.keys(metaObj).length) metaSnap[e.id]=metaObj;
@@ -3040,6 +3178,7 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
   const durationMinutes = Math.max(0, Math.round((new Date(finishedAt)-new Date(startedAt))/60000));
   const score = Math.max(0, Math.round(((doneCount + skippedCount*.35) / Math.max(1, dayExercises.length)) * 100));
   const record = {id:'h_'+Date.now(), date:finishedAt, startedAt, finishedAt, durationMinutes, workoutId:id, workoutName:w.name, workoutVariant:variant, workoutAdjustment:currentAdjustment(p), substitutions, doneCount, skippedCount, score, weights, status, meta:metaSnap};
+  updateExerciseGoalsFromWorkout(p,w,record,dayExercises);
   const xpInfo = awardWorkoutXP(p,w,record);
   if(aiConfigured(p) && p.ai.autoWorkoutReport && canUseOnlineAI()) record.aiReportStatus='pending';
   else if(p.ai.autoWorkoutReport && isOffline()) record.aiReportError='IA pausada: você estava offline.';
@@ -3167,6 +3306,8 @@ function buildWorkoutAIPayload(p, h){
     weight:h.weights?.[e.id] || '',
     completedAt:h.meta?.[e.id]?.completedAt || null,
     skippedAt:h.meta?.[e.id]?.skippedAt || null,
+    repsPerSet:h.meta?.[e.id]?.repsPerSet || [],
+    suggestedGoal:currentExerciseGoal(p,e),
     meta:h.meta?.[e.id] || {}
   }));
   const previousSame=p.history.filter(x=>x.id!==h.id && x.workoutId===h.workoutId).slice(-3).map(x=>({date:x.date, score:x.score, weights:x.weights, status:x.status, meta:x.meta}));
@@ -3180,6 +3321,7 @@ function buildWorkoutAIPayload(p, h){
     activeWorkoutAdjustment:h.workoutAdjustment || currentAdjustment(p),
     workoutVariant:h.workoutVariant || null,
     recentDailyCheckins:recentDailyCheckins(p,7),
+    exerciseGoals:p.exerciseGoals || {},
     recentHistory:p.history.slice(-8).map(x=>({date:x.date, workoutId:x.workoutId, workoutName:x.workoutName, score:x.score, doneCount:x.doneCount, skippedCount:x.skippedCount}))
   };
 }
@@ -3200,6 +3342,7 @@ async function generateWorkoutAIReport(profileId, historyId){
     const data=await response.json().catch(()=>({}));
     if(!response.ok) throw new Error(data.error || `Erro HTTP ${response.status}`);
     h.aiReport=data.report || {title:'Relatório da IA', summary:data.text || 'Relatório gerado.'};
+    applyAiExerciseGoalsFromReport(p,h,workoutById(p,h.workoutId));
     h.aiReportStatus='done';
     h.aiReportError='';
     save(); await saveWorkoutToCloud(p, h, {silent:true}); render(); toast('Relatório da IA salvo.');
@@ -3441,13 +3584,14 @@ function serializeCurrentPlan(p=profile()){
     planMeta:p.planMeta || {},
     workouts:p.workouts || [],
     queue:p.queue || [],
+    exerciseGoals:p.exerciseGoals || {},
     target:p.target,
     programWeeks:p.programWeeks,
     programLabel:p.programLabel,
     profileSnapshot:{
       name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight,
       goal:p.goal, focus:p.focus, experience:p.experience, daysPerWeek:p.daysPerWeek, notes:p.notes,
-      routine:p.routine || {}, reminders:p.reminders || {}
+      routine:p.routine || {}, reminders:p.reminders || {}, exerciseGoals:p.exerciseGoals || {}
     }
   };
 }
@@ -3499,6 +3643,7 @@ async function loadLatestPlanFromCloud(){
       p.target=saved.target || p.target;
       p.programWeeks=saved.programWeeks || p.programWeeks;
       p.programLabel=saved.programLabel || p.programLabel;
+      p.exerciseGoals=saved.exerciseGoals || saved.profileSnapshot?.exerciseGoals || p.exerciseGoals || {};
       save();
       return {ok:true, loaded:true};
     }
@@ -3592,11 +3737,11 @@ async function saveWorkoutToCloud(p, h, opts={}){
         exercise_name:e.name || '',
         exercise_type:e.type || null,
         weight:parseNumberValue(h.weights?.[e.id]),
-        reps:parseNumberValue(h.meta?.[e.id]?.reps),
+        reps:parseNumberValue(h.meta?.[e.id]?.repsDoneAvg || h.meta?.[e.id]?.reps),
         sets:parseNumberValue(h.meta?.[e.id]?.sets),
         difficulty:h.meta?.[e.id]?.difficulty || null,
         pain:h.meta?.[e.id]?.pain || null,
-        notes:[h.meta?.[e.id]?.note, h.meta?.[e.id]?.completedAt ? `Concluído às ${fmtTime(h.meta[e.id].completedAt)}` : '', h.meta?.[e.id]?.skippedAt ? `Pulado às ${fmtTime(h.meta[e.id].skippedAt)}` : '', h.meta?.[e.id]?.cardioTime ? `Cardio ${h.meta[e.id].cardioTime}` : '', h.meta?.[e.id]?.coreDone ? `Core ${h.meta[e.id].coreDone}` : ''].filter(Boolean).join(' • ') || null,
+        notes:[h.meta?.[e.id]?.note, h.meta?.[e.id]?.reps ? `Reps ${h.meta[e.id].reps}` : '', h.meta?.[e.id]?.completedAt ? `Concluído às ${fmtTime(h.meta[e.id].completedAt)}` : '', h.meta?.[e.id]?.skippedAt ? `Pulado às ${fmtTime(h.meta[e.id].skippedAt)}` : '', h.meta?.[e.id]?.cardioTime ? `Cardio ${h.meta[e.id].cardioTime}` : '', h.meta?.[e.id]?.coreDone ? `Core ${h.meta[e.id].coreDone}` : ''].filter(Boolean).join(' • ') || null,
         skipped:h.status?.[e.id]==='skipped',
         completed:h.status?.[e.id]==='done'
       }));
