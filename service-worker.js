@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gym-bronze-v7-6-3-aulas-db';
+const CACHE_NAME = 'gym-bronze-v7-6-4-report-hotfix';
 const ASSETS = [
   './',
   './index.html',

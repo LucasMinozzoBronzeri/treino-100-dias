@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.6.3';
+const APP_VERSION = '7.6.4';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -2873,14 +2873,18 @@ function generateInsights(p){
 }
 function compareBio(a,b){ const parts=[]; [['weight','Peso','kg'],['bodyFat','Gordura','%'],['leanMass','Massa magra','kg'],['waist','Cintura','cm']].forEach(([k,n,u])=>{const x=parseFloat(a[k]), y=parseFloat(b[k]); if(!isNaN(x)&&!isNaN(y)){ const d=+(y-x).toFixed(1); parts.push(`${n}: ${d>0?'+':''}${d}${u}`); }}); return parts.length?parts.join(' • '):'Duas avaliações salvas; preencha mais campos para comparação melhor.'; }
 
+function aiErrorActionsHTML(h){
+  if(!h?.aiReportError) return '';
+  return `<div class="actions" style="margin-top:8px"><button class="btn sm secondary" data-retry-ai-report="${esc(h.id)}">Tentar IA novamente</button></div>`;
+}
 function aiHistoryHTML(h){
   const badge = h.aiReportStatus==='pending' ? '<span class="badge yellow">Gerando</span>' : h.aiReportError ? '<span class="badge red">Erro</span>' : '<span class="badge green">IA</span>';
-  const body = h.aiReport ? `<div class="ai-report"><strong>${esc(h.aiReport.title||'Relatório da IA')}</strong><p>${esc(h.aiReport.summary||'')}</p>${h.aiReport.evolution?`<p><b>Evolução:</b> ${esc(h.aiReport.evolution)}</p>`:''}${h.aiReport.attention?`<p><b>Atenção:</b> ${esc(h.aiReport.attention)}</p>`:''}${h.aiReport.nextGoal?`<p><b>Próxima meta:</b> ${esc(h.aiReport.nextGoal)}</p>`:''}</div>` : h.aiReportError ? `<div class="ai-report error"><strong>Erro ao gerar IA</strong><p>${esc(h.aiReportError)}</p></div>` : '<div class="ai-report"><p>Relatório em processamento...</p></div>';
+  const body = h.aiReport ? `<div class="ai-report"><strong>${esc(h.aiReport.title||'Relatório da IA')}</strong><p>${esc(h.aiReport.summary||'')}</p>${h.aiReport.evolution?`<p><b>Evolução:</b> ${esc(h.aiReport.evolution)}</p>`:''}${h.aiReport.attention?`<p><b>Atenção:</b> ${esc(h.aiReport.attention)}</p>`:''}${h.aiReport.nextGoal?`<p><b>Próxima meta:</b> ${esc(h.aiReport.nextGoal)}</p>`:''}</div>` : h.aiReportError ? `<div class="ai-report error"><strong>Erro ao gerar IA</strong><p>${esc(h.aiReportError)}</p>${aiErrorActionsHTML(h)}</div>` : '<div class="ai-report"><p>Relatório em processamento...</p></div>';
   return `<div class="history-row ai-row"><div><strong>${h.workoutId} — ${esc(h.workoutName)}</strong><span>${fmtDate(h.date)}</span>${body}</div>${badge}</div>`;
 }
 function historyRowHTML(h){
   const aiBadge = h.aiReport ? '<span class="badge green">IA</span>' : h.aiReportStatus==='pending' ? '<span class="badge yellow">IA...</span>' : h.aiReportError ? '<span class="badge red">IA erro</span>' : '';
-  const report = h.aiReport ? `<div class="ai-report compact"><p>${esc(h.aiReport.summary||'Relatório salvo.')}</p>${h.aiReport.nextGoal?`<p><b>Meta:</b> ${esc(h.aiReport.nextGoal)}</p>`:''}</div>` : '';
+  const report = h.aiReport ? `<div class="ai-report compact"><p>${esc(h.aiReport.summary||'Relatório salvo.')}</p>${h.aiReport.nextGoal?`<p><b>Meta:</b> ${esc(h.aiReport.nextGoal)}</p>`:''}</div>` : h.aiReportError ? `<div class="ai-report error compact"><p><b>Erro IA:</b> ${esc(h.aiReportError)}</p>${aiErrorActionsHTML(h)}</div>` : '';
   const timeInfo = h.startedAt ? `${fmtDate(h.date)} • ${fmtTime(h.startedAt)}–${fmtTime(h.finishedAt||h.date)}${h.durationMinutes!==undefined ? ' • '+h.durationMinutes+' min' : ''}` : `${fmtDate(h.date)} • ${fmtTime(h.date)}`;
   return `<div class="history-row"><div><strong>${h.workoutId} — ${esc(h.workoutName)}</strong><span>${timeInfo} • ${h.doneCount} concluídos • ${h.skippedCount} pulados</span>${report}</div><div class="badge-stack"><span class="badge">${h.score}%</span>${aiBadge}</div></div>`;
 }
@@ -3010,6 +3014,7 @@ function bindScreen(){
   document.querySelectorAll('[data-complete-lesson]').forEach(el=>el.onclick=()=>completeLesson(el.dataset.completeLesson));
   document.querySelectorAll('[data-edit-lesson]').forEach(el=>el.onclick=()=>openLessonModal(el.dataset.editLesson));
   document.querySelectorAll('[data-delete-lesson]').forEach(el=>el.onclick=()=>deleteLesson(el.dataset.deleteLesson));
+  document.querySelectorAll('[data-retry-ai-report]').forEach(el=>el.onclick=()=>retryWorkoutAIReport(el.dataset.retryAiReport));
 }
 function handleAction(a){
   if(a==='start-current'){ const w=currentWorkout(); if(!w) return toast('Gere um treino primeiro.'); openWorkout(w.id); }
@@ -3729,6 +3734,17 @@ function buildWorkoutAIPayload(p, h){
     exerciseGoals:p.exerciseGoals || {},
     recentHistory:p.history.slice(-8).map(x=>({date:x.date, workoutId:x.workoutId, workoutName:x.workoutName, score:x.score, doneCount:x.doneCount, skippedCount:x.skippedCount}))
   };
+}
+async function retryWorkoutAIReport(historyId){
+  const p=profile();
+  const h=p.history.find(x=>x.id===historyId);
+  if(!h) return toast('Treino não encontrado.');
+  if(!canUseOnlineAI()) return toast(isOffline()?'Você está offline.':'Entre na conta para usar IA.');
+  h.aiReportStatus='pending';
+  h.aiReportError='';
+  save(); render();
+  toast('Tentando gerar relatório novamente...');
+  generateWorkoutAIReport(p.id, h.id);
 }
 async function generateWorkoutAIReport(profileId, historyId){
   const p=ensureProfile(state.profiles.find(x=>x.id===profileId));
