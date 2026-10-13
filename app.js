@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.6.0';
+const APP_VERSION = '7.6.2';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -1582,6 +1582,7 @@ function render(){
     document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
     byId('content').innerHTML = onlineNoticeHTML() + renderOnboarding() + appFooterHTML();
     bindOnboarding();
+    wireSmartHeightInputs();
     return;
   }
   document.body.classList.remove('onboarding-active');
@@ -1598,6 +1599,7 @@ function render(){
     console.error('Erro ao renderizar tela', screen, err);
     byId('content').innerHTML = onlineNoticeHTML() + `<section class="card"><div class="card-title"><div><h3>Não consegui abrir esta tela</h3><p>Erro temporário ao carregar ${esc(titleFor(screen))}. Tente atualizar o app.</p></div><span class="badge red">erro</span></div><p class="muted">${esc(err && err.message ? err.message : 'erro desconhecido')}</p><div class="actions"><button class="btn" data-screen-go="home">Voltar ao início</button></div></section>` + appFooterHTML();
   }
+  wireSmartHeightInputs();
   bindScreen();
 }
 
@@ -1618,7 +1620,7 @@ function renderOnboarding(){
     <div class="card auth-card">
       <div class="card-title"><div><h3>Entrar</h3><p>Acesse sua conta para continuar.</p></div></div>
       <div class="form-grid single">
-        <div class="field"><label>E-mail</label><input class="input" id="loginEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div>
+        <div class="field"><label>E-mail</label><input class="input" id="loginEmail" type="text" inputmode="email" autocomplete="email" placeholder="seu@email.com"></div>
         <div class="field"><label>Senha</label><input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="sua senha"></div>
       </div>
       <div class="actions"><button class="btn full" data-onboarding="login">Entrar</button><button class="btn google full" data-onboarding="google-login" type="button"><span>G</span> Entrar com Google</button></div>
@@ -1708,7 +1710,7 @@ function renderSignupOnboarding(){
     <div class="signup-step-panel" data-signup-step="3">
       <div class="section-head compact"><div><h3>3. Acesso da conta</h3><p>Agora só falta e-mail, senha e aceite dos termos.</p></div></div>
       <div class="form-grid">
-        <div class="field"><label>E-mail</label><input class="input" id="signupEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div>
+        <div class="field"><label>E-mail</label><input class="input" id="signupEmail" type="text" inputmode="email" autocomplete="email" placeholder="seu@email.com"></div>
         <div class="field"><label>Senha</label><input class="input" id="signupPassword" type="password" autocomplete="new-password" placeholder="Maiúscula, número e especial"></div>
         <div class="field"><label>Confirmar senha</label><input class="input" id="signupPassword2" type="password" autocomplete="new-password" placeholder="repita a senha"></div>
         <label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="signupAcceptTerms"> <span>Li e aceito os Termos, a Política de Privacidade e entendo que o Gym Bronze não substitui profissionais de saúde, nutrição ou educação física.</span></label>
@@ -1790,6 +1792,35 @@ function onboardingProfileFields(prefix){
     <div class="field" style="grid-column:1/-1"><label>Observações importantes</label><textarea id="${prefix}Notes" placeholder="Dor, limitação, tempo disponível, exercícios que gosta/não gosta, restrições alimentares..."></textarea></div>
   </div>`;
 }
+
+function formatHeightSmart(value){
+  let raw=String(value || '').trim().replace(/\s+/g,'').replace('.', ',');
+  if(!raw) return '';
+  if(raw.includes(',')){
+    const parts=raw.split(',');
+    const left=(parts[0] || '').replace(/\D/g,'').slice(0,1);
+    const right=(parts.slice(1).join('') || '').replace(/\D/g,'').slice(0,2);
+    if(!left) return right ? `0,${right}` : '';
+    return right ? `${left},${right}` : left;
+  }
+  const digits=raw.replace(/\D/g,'').slice(0,3);
+  if(digits.length >= 3) return `${digits[0]},${digits.slice(1)}`;
+  return digits;
+}
+function wireSmartHeightInputs(){
+  document.querySelectorAll('input[id$="Height"]').forEach(inp=>{
+    if(inp.dataset.smartHeightWired) return;
+    inp.dataset.smartHeightWired='1';
+    inp.autocomplete = inp.autocomplete || 'off';
+    inp.oninput=()=>{
+      const before=inp.value;
+      const after=formatHeightSmart(before);
+      if(after !== before) inp.value=after;
+    };
+    inp.onblur=()=>{ inp.value=formatHeightSmart(inp.value); };
+  });
+}
+
 function bindOnboarding(){
   document.querySelectorAll('[data-onboarding]').forEach(btn=>btn.onclick=()=>handleOnboarding(btn.dataset.onboarding));
   if(onboardingView==='signup') setSignupStep(signupStep);
@@ -1876,7 +1907,7 @@ function readOnboardingProfile(prefix){
     name: byId(prefix+'Name')?.value?.trim() || '',
     age: byId(prefix+'Age')?.value?.trim() || '',
     sex: byId(prefix+'Sex')?.value?.trim() || '',
-    height: byId(prefix+'Height')?.value?.trim() || '',
+    height: formatHeightSmart(byId(prefix+'Height')?.value) || '',
     weight: byId(prefix+'Weight')?.value?.trim() || '',
     goal: byId(prefix+'Goal')?.value?.trim() || '',
     focus: byId(prefix+'Focus')?.value?.trim() || '',
@@ -1925,12 +1956,13 @@ async function requestReminderPermission(){
 function showReminderNotification(title, body){
   try{
     if(!notificationAvailable() || Notification.permission !== 'granted') return false;
-    const options = {
+    const options={
       body: body || '',
-      icon: './icons/icon-192.png',
-      badge: './icons/icon-192.png',
+      icon: 'icons/icon-192.png',
+      badge: 'icons/icon-192.png',
       tag: 'gym-bronze-reminder',
-      renotify: false
+      renotify: false,
+      silent: false
     };
     if(navigator.serviceWorker && navigator.serviceWorker.ready){
       navigator.serviceWorker.ready.then(reg=>{
@@ -1946,1030 +1978,6 @@ function showReminderNotification(title, body){
   }
 }
 
-function showFormError(id, message){
-  const el=byId(id);
-  if(!el){ toast(message); return; }
-  el.textContent=message;
-  el.classList.remove('hidden');
-}
-
-function friendlyAuthError(error){
-  const msg = String(error?.message || error || '').toLowerCase();
-  if(msg.includes('invalid login credentials') || msg.includes('invalid credentials')){
-    return 'Conta não encontrada ou senha incorreta. Verifique os dados, crie uma conta ou use o modo local.';
-  }
-  if(msg.includes('email not confirmed') || msg.includes('not confirmed')){
-    return 'Confirme seu e-mail antes de entrar. Abra o link enviado para sua caixa de entrada.';
-  }
-  if(msg.includes('rate limit')){
-    return 'Muitas tentativas agora. Aguarde alguns minutos e tente novamente.';
-  }
-  return error?.message || 'Não foi possível entrar agora.';
-}
-function normalizeProfileInfoFromUser(user){
-  const meta = user?.user_metadata || {};
-  return {
-    name: meta.display_name || meta.name || user?.email?.split('@')[0] || '',
-    age: meta.age || '',
-    sex: meta.sex || '',
-    height: meta.height || '',
-    weight: meta.weight || meta.initial_weight || '',
-    goal: meta.goal || '',
-    focus: meta.focus || '',
-    experience: meta.experience || 'Iniciante',
-    daysPerWeek: String(meta.daysPerWeek || meta.days_per_week || 5),
-    routine: meta.routine || {wakeTime:meta.wake_time||'09:00', lunchTime:meta.lunch_time||'13:00', dinnerTime:meta.dinner_time||'20:00', workdayDescription:meta.workday_description||''},
-    reminders: meta.reminders || null,
-    notes: meta.notes || ''
-  };
-}
-function profileInfoLooksComplete(info){
-  if(!info) return false;
-  return !validateProfileInfo({
-    name:info.name || '',
-    age:info.age || '',
-    sex:info.sex || '',
-    height:info.height || '',
-    weight:info.weight || '',
-    goal:info.goal || '',
-    focus:info.focus || '',
-    experience:info.experience || 'Iniciante',
-    daysPerWeek:info.daysPerWeek || '5',
-    notes:info.notes || ''
-  });
-}
-function currentProfileLooksComplete(p=profile()){
-  if(!p) return false;
-  return profileInfoLooksComplete({
-    name:p.name, age:p.age, sex:p.sex, height:p.height, weight:p.weight,
-    goal:p.goal, focus:p.focus, experience:p.experience, daysPerWeek:p.daysPerWeek, notes:p.notes
-  });
-}
-async function onboardingGoogleLogin(){
-  if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
-  if(isOffline()) return toast('Você está offline. Entre com Google quando estiver online.');
-  const redirectTo = window.location.origin + window.location.pathname;
-  const { error } = await supabaseClient.auth.signInWithOAuth({
-    provider:'google',
-    options:{ redirectTo, queryParams:{ prompt:'select_account' } }
-  });
-  if(error) return toast('Erro ao abrir Google: '+friendlyAuthError(error));
-}
-async function onboardingGoogleComplete(){
-  if(!cloudUser || isAnonymousCloudUser()){
-    await refreshCloudUser(false);
-    if(!cloudUser || isAnonymousCloudUser()) return showFormError('googleError','Sessão Google não encontrada. Entre com Google novamente.');
-  }
-  const info=readOnboardingProfile('google');
-  const msg=validateProfileInfo(info);
-  if(msg) return showFormError('googleError', msg);
-  if(!byId('googleAcceptTerms')?.checked) return showFormError('googleError', 'Aceite os Termos e a Política de Privacidade para continuar.');
-  const p=prepareAccountProfile(cloudUser, info);
-  applyProfileInfo(info, p);
-  p.cloudUserId=cloudUser.id;
-  p.accountEmail=cloudUser.email || p.accountEmail || '';
-  markLegalAcceptance(p);
-  await maybeAskNotificationPermissionForProfile(p);
-  state.pendingProfileCompletion=null;
-  googleStep=1;
-  state.pendingEmailVerification=null;
-  state.onboardingDone=true;
-  state.entryMode='account';
-  screen='home';
-  save();
-  try{ await upsertCloudProfile(info.name, info); }catch(e){ console.warn('profile upsert failed', e); }
-  await generateInitialPlanFromAI({silent:false, force:true, fallbackDefault:true});
-  toast(profile().planMeta?.source==='ai' ? 'Perfil Google completo. Treino específico criado.' : 'Perfil Google completo. Apliquei treino padrão por fallback.');
-  render();
-}
-async function googleCompletionLogout(){
-  if(supabaseClient) await supabaseClient.auth.signOut().catch(()=>{});
-  cloudUser=null;
-  state.pendingProfileCompletion=null;
-  googleStep=1;
-  state.onboardingDone=false;
-  state.entryMode=null;
-  onboardingView='login';
-  save();
-  render();
-  toast('Conta Google desconectada.');
-}
-function setPendingEmailVerification(email, profileInfo=null, legalInfo=null){
-  const current = state.pendingEmailVerification || {};
-  state.pendingEmailVerification = {
-    email: email || current.email || '',
-    createdAt: current.createdAt || nowISO(),
-    profileInfo: profileInfo || current.profileInfo || null,
-    acceptedTermsAt: legalInfo?.acceptedTermsAt || current.acceptedTermsAt || null,
-    acceptedPrivacyAt: legalInfo?.acceptedPrivacyAt || current.acceptedPrivacyAt || null
-  };
-  state.onboardingDone = false;
-  state.entryMode = null;
-  onboardingView = 'verify';
-  save();
-}
-async function fetchCloudProfileInfo(user){
-  if(!supabaseClient || !user?.id) return null;
-  try{
-    const { data, error } = await supabaseClient.from('profiles').select('*').eq('id', user.id).maybeSingle();
-    if(error || !data) return null;
-    return {
-      name:data.name || user.email?.split('@')[0] || '',
-      age:data.age || '',
-      sex:data.sex || '',
-      height:data.height || '',
-      weight:data.initial_weight || '',
-      goal:data.goal || '',
-      focus:data.focus || '',
-      experience:data.experience || 'Iniciante',
-      daysPerWeek:String(data.days_per_week || 5),
-      notes:data.notes || '',
-      routine:data.routine || {wakeTime:data.wake_time||'09:00', lunchTime:data.lunch_time||'13:00', dinnerTime:data.dinner_time||'20:00', workdayDescription:data.workday_description||''},
-      reminders:data.reminders || null
-    };
-  }catch(e){ return null; }
-}
-function findLocalProfileForCloudUser(user){
-  if(!user) return null;
-  return state.profiles.find(p=>p.cloudUserId===user.id || (p.accountEmail && user.email && String(p.accountEmail).toLowerCase()===String(user.email).toLowerCase())) || null;
-}
-function prepareAccountProfile(user, info={}){
-  let p=findLocalProfileForCloudUser(user);
-  if(!p){
-    p=newProfile(info?.name || user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Novo usuário');
-    p.cloudUserId=user.id;
-    p.accountEmail=user.email || '';
-    state.profiles.push(p);
-  }
-  state.activeProfileId=p.id;
-  p.cloudUserId=user.id;
-  p.accountEmail=user.email || p.accountEmail || '';
-  // Só aplica os dados cadastrais neste perfil da conta, nunca no perfil ativo antigo.
-  if(info && info.name) applyProfileInfo(info, p);
-  ensureProfile(p);
-  return p;
-}
-async function completeVerifiedAccountSession(){
-  const user = await getCurrentCloudUser();
-  if(!user || isAnonymousCloudUser()) return false;
-  const confirmed = !!(user.email_confirmed_at || user.confirmed_at);
-  if(!confirmed){
-    setPendingEmailVerification(user.email || state.pendingEmailVerification?.email || '');
-    return false;
-  }
-
-  const pending = state.pendingEmailVerification || {};
-  const cloudInfo = await fetchCloudProfileInfo(user);
-  const signupInfo = pending.profileInfo || cloudInfo || normalizeProfileInfoFromUser(user);
-  const accountProfile = prepareAccountProfile(user, signupInfo);
-
-  if(!profileInfoLooksComplete(signupInfo) && !currentProfileLooksComplete(accountProfile)){
-    state.pendingProfileCompletion={
-      provider:'google',
-      userId:user.id,
-      email:user.email || '',
-      name:signupInfo?.name || user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || ''
-    };
-    state.pendingEmailVerification=null;
-    state.onboardingDone=false;
-    state.entryMode='account';
-    onboardingView='google-complete';
-    googleStep=1;
-    save();
-    return false;
-  }
-
-  if(pending.acceptedTermsAt) accountProfile.acceptedTermsAt = pending.acceptedTermsAt;
-  if(pending.acceptedPrivacyAt) accountProfile.acceptedPrivacyAt = pending.acceptedPrivacyAt;
-  markLegalAcceptance(accountProfile);
-
-  state.pendingEmailVerification = null;
-  state.pendingProfileCompletion = null;
-  state.onboardingDone = true;
-  state.entryMode = 'account';
-  save();
-
-  try{ await upsertCloudProfile(accountProfile.name || user.user_metadata?.display_name || 'Usuário', signupInfo); }catch(e){ console.warn('profile upsert failed', e); }
-  try{ await loadLatestPlanFromCloud(); }catch(e){ console.warn('plan load failed', e); }
-  try{ await loadLatestDietPlanFromCloud(); }catch(e){ console.warn('diet load failed', e); }
-  try{ await loadLessonsFromCloud({silent:true}); }catch(e){ console.warn('lessons load failed', e); }
-  try{ await syncXpEventsToCloud({silent:true}); await loadXpFromCloud({silent:true}); }catch(e){ console.warn('xp sync/load failed', e); }
-  save();
-  return true;
-}
-function validateProfileInfo(info){
-  if(!info.name || info.name.length < 2) return 'Informe um nome com pelo menos 2 letras.';
-  const age=Number(info.age);
-  if(!Number.isFinite(age) || age < 12 || age > 99) return 'Informe uma idade válida.';
-  if(!info.sex) return 'Informe o sexo para personalizar melhor o treino.';
-  const height=parseNumberValue(info.height);
-  if(!height || height < 1 || height > 2.5) return 'Informe uma altura válida. Exemplo: 1,88.';
-  const weight=parseNumberValue(info.weight);
-  if(!weight || weight < 30 || weight > 300) return 'Informe um peso inicial válido.';
-  if(!info.goal || info.goal.length < 3) return 'Informe seu objetivo.';
-  if(!info.focus || info.focus.length < 2) return 'Informe seu foco principal.';
-  if(!info.experience) return 'Informe sua experiência.';
-  if(!info.daysPerWeek || clampTrainingDays(info.daysPerWeek) != Number(info.daysPerWeek)) return 'Escolha entre 2 e 6 dias por semana.';
-  return '';
-}
-
-function validateStrongPassword(password){
-  if(!password || password.length < 8) return 'A senha precisa ter pelo menos 8 caracteres.';
-  if(!/[A-ZÁÉÍÓÚÂÊÔÃÕÇ]/.test(password)) return 'A senha precisa ter ao menos uma letra maiúscula.';
-  if(!/[0-9]/.test(password)) return 'A senha precisa ter ao menos um número.';
-  if(!/[^A-Za-z0-9À-ÿ]/.test(password)) return 'A senha precisa ter ao menos um caractere especial.';
-  return '';
-}
-function markLegalAcceptance(targetProfile=null){
-  const p=targetProfile || profile();
-  const now=nowISO();
-  p.acceptedTermsAt = p.acceptedTermsAt || now;
-  p.acceptedPrivacyAt = p.acceptedPrivacyAt || now;
-  return p;
-}
-function applyProfileInfo(info, targetProfile=null){
-  const p=targetProfile || profile();
-  p.name=info.name;
-  p.age=info.age;
-  p.sex=info.sex;
-  p.height=info.height;
-  p.weight=info.weight;
-  p.goal=info.goal;
-  p.focus=info.focus;
-  p.experience=normalizeExperienceLabel(info.experience);
-  p.daysPerWeek=String(clampTrainingDays(info.daysPerWeek));
-  p.notes=info.notes;
-  if(info.routine){
-    p.routine={
-      ...(p.routine||{}),
-      wakeTime:normalizeTimeText(info.routine.wakeTime,'09:00'),
-      lunchTime:normalizeTimeText(info.routine.lunchTime,'13:00'),
-      dinnerTime:normalizeTimeText(info.routine.dinnerTime,'20:00'),
-      workdayDescription:info.routine.workdayDescription||'',
-      lessons:Array.isArray(info.routine.lessons)?info.routine.lessons:(p.routine?.lessons||[]),
-      lessonLogs:Array.isArray(info.routine.lessonLogs)?info.routine.lessonLogs:(p.routine?.lessonLogs||[])
-    };
-    if(Array.isArray(p.routine.lessons)) p.lessons=p.routine.lessons;
-    if(Array.isArray(p.routine.lessonLogs)) p.lessonLogs=p.routine.lessonLogs;
-  }
-  if(info.reminders){
-    p.reminders={...(p.reminders||{}), ...info.reminders, types:{...(p.reminders?.types||{}), ...(info.reminders.types||{})}, times:{...(p.reminders?.times||{}), ...(info.reminders.times||{})}, water:{...(p.reminders?.water||{}), ...(info.reminders.water||{})}};
-    p.reminders.enabled=!!(p.reminders.types?.workout||p.reminders.types?.meals||p.reminders.types?.water);
-  }else if(p.routine && !p.reminders?.times?.workout){
-    p.reminders={...(p.reminders||{}), times:{...(p.reminders?.times||{}), workout:suggestedWorkoutTimeFromRoutine(p)}};
-  }
-  applyProgramDuration(p);
-  ensureProfile(p);
-  if(!Array.isArray(p.workouts) || !p.workouts.length){
-    p.queue=[];
-    p.planMeta={source:'pending', cycle:p.planMeta?.cycle || 1, title:'Aguardando treino inteligente', notes:'O app vai tentar gerar um treino específico com IA. Se falhar, você pode usar o treino padrão.'};
-  }
-  save();
-  return p;
-}
-function createFreshLocalProfile(info){
-  const p = newProfile(info?.name || 'Perfil local');
-  state.profiles.push(p);
-  state.activeProfileId = p.id;
-  applyProfileInfo(info, p);
-  return p;
-}
-async function verifyEmailLoginNow(){
-  const email = state.pendingEmailVerification?.email || '';
-  onboardingView = 'login';
-  render();
-  setTimeout(()=>{
-    const input = byId('loginEmail');
-    if(input && email) input.value = email;
-    const pass = byId('loginPassword');
-    if(pass) pass.focus();
-  }, 50);
-}
-async function resendVerificationEmail(){
-  if(!supabaseClient) return showFormError('verifyError', 'Supabase não carregou. Reabra o app.');
-  if(isOffline()) return showFormError('verifyError', 'Você está offline. Tente reenviar quando estiver online.');
-  const email = state.pendingEmailVerification?.email || '';
-  if(!email) return showFormError('verifyError', 'E-mail não encontrado. Crie a conta novamente.');
-  const { error } = await supabaseClient.auth.resend({ type:'signup', email });
-  if(error) return showFormError('verifyError', 'Erro ao reenviar: '+error.message);
-  toast('E-mail reenviado. Confira sua caixa de entrada.');
-}
-async function useLocalWhileEmailPending(){
-  state.pendingEmailVerification = null;
-  onboardingView = 'local';
-  state.entryMode = null;
-  state.onboardingDone = false;
-  save();
-  render();
-}
-
-async function onboardingLogin(){
-  if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
-  if(isOffline()) return toast('Você está offline. Faça login quando estiver online.');
-  const email=byId('loginEmail')?.value?.trim();
-  const password=byId('loginPassword')?.value || '';
-  if(!email || !password) return toast('Informe e-mail e senha.');
-  const { data, error } = await supabaseClient.auth.signInWithPassword({email,password});
-  if(error){
-    const msg = friendlyAuthError(error);
-    state.pendingEmailVerification = msg.toLowerCase().includes('confirme') ? {email, createdAt:nowISO()} : state.pendingEmailVerification;
-    save();
-    toast(msg);
-    if(msg.toLowerCase().includes('confirme')){ onboardingView='verify'; render(); }
-    return;
-  }
-  cloudUser=data?.user || null;
-  if(!cloudUser) return toast('Não foi possível abrir sua sessão.');
-  const confirmed = !!(cloudUser.email_confirmed_at || cloudUser.confirmed_at);
-  if(!confirmed){
-    await supabaseClient.auth.signOut().catch(()=>{});
-    cloudUser=null;
-    setPendingEmailVerification(email);
-    toast('Confirme seu e-mail para ativar a conta.');
-    render();
-    return;
-  }
-  await completeVerifiedAccountSession();
-  screen='home';
-  toast('Login realizado.');
-  render();
-}
-async function onboardingSignup(){
-  if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
-  if(isOffline()) return toast('Você está offline. Crie a conta quando estiver online.');
-  const info=readOnboardingProfile('signup');
-  const msg=validateProfileInfo(info);
-  if(msg) return showFormError('signupError', msg);
-  const email=byId('signupEmail')?.value?.trim();
-  const password=byId('signupPassword')?.value || '';
-  const password2=byId('signupPassword2')?.value || '';
-  if(!email || !email.includes('@')) return showFormError('signupError', 'Informe um e-mail válido.');
-  const passMsg=validateStrongPassword(password);
-  if(passMsg) return showFormError('signupError', passMsg);
-  if(password !== password2) return showFormError('signupError', 'As senhas não conferem.');
-  if(!byId('signupAcceptTerms')?.checked) return showFormError('signupError', 'Aceite os Termos e a Política de Privacidade para continuar.');
-
-  applyProfileInfo(info);
-  markLegalAcceptance();
-  await maybeAskNotificationPermissionForProfile(profile());
-  const legalInfo = {
-    acceptedTermsAt: profile().acceptedTermsAt || nowISO(),
-    acceptedPrivacyAt: profile().acceptedPrivacyAt || nowISO()
-  };
-  save();
-
-  const { data, error } = await supabaseClient.auth.signUp({
-    email,
-    password,
-    options:{
-      data:{
-        display_name:info.name,
-        name:info.name,
-        sex:info.sex,
-        age:info.age,
-        height:info.height,
-        weight:info.weight,
-        initial_weight:info.weight,
-        goal:info.goal,
-        focus:info.focus,
-        experience:info.experience,
-        daysPerWeek:info.daysPerWeek,
-        days_per_week:info.daysPerWeek,
-        notes:info.notes || '',
-        routine:info.routine || null,
-        reminders:info.reminders || null,
-        wake_time:info.routine?.wakeTime || '',
-        lunch_time:info.routine?.lunchTime || '',
-        dinner_time:info.routine?.dinnerTime || '',
-        workday_description:info.routine?.workdayDescription || '',
-        accepted_terms_at:legalInfo.acceptedTermsAt,
-        accepted_privacy_at:legalInfo.acceptedPrivacyAt
-      },
-      emailRedirectTo: window.location.origin + window.location.pathname
-    }
-  });
-  if(error) return showFormError('signupError', 'Erro ao criar conta: '+friendlyAuthError(error));
-
-  const user = data?.user || null;
-  const confirmed = !!(user?.email_confirmed_at || user?.confirmed_at);
-  if(data?.session?.access_token && confirmed){
-    cloudUser = data.session.user || user || null;
-    await completeVerifiedAccountSession();
-    await generateInitialPlanFromAI({silent:false, fallbackDefault:true});
-    screen='home';
-    toast('Conta criada e conectada. Treino específico preparado ou fallback aplicado.');
-  } else {
-    // Conta foi criada no Supabase, mas só será ativada no app após confirmação.
-    await supabaseClient.auth.signOut().catch(()=>{});
-    cloudUser = null;
-    setPendingEmailVerification(email, info, legalInfo);
-    toast('Enviamos um link. Confirme seu e-mail para ativar sua conta.');
-  }
-  render();
-}
-
-async function onboardingLocal(){
-  const info=readOnboardingProfile('local');
-  const msg=validateProfileInfo(info);
-  if(msg) return showFormError('localError', msg);
-  if(!byId('localAcceptTerms')?.checked) return showFormError('localError', 'Aceite os Termos e a Política de Privacidade para continuar.');
-
-  // Modo local deve sempre começar como um perfil novo, sem reaproveitar
-  // nome, histórico, fila ou sessão anônima anterior.
-  createFreshLocalProfile(info);
-  markLegalAcceptance();
-  await maybeAskNotificationPermissionForProfile(profile());
-  state.onboardingDone=true;
-  state.entryMode='local';
-  save();
-
-  if(supabaseClient && !isOffline()){
-    try{
-      // Garante uma sessão anônima nova para este perfil local.
-      // Sem isso, o Supabase pode reaproveitar o anônimo anterior.
-      await supabaseClient.auth.signOut().catch(()=>{});
-      cloudUser=null;
-      const { data, error } = await supabaseClient.auth.signInAnonymously({options:{data:{display_name:info.name, entry_mode:'local', local_profile_id: state.activeProfileId}}});
-      if(error) throw error;
-      cloudUser=data?.user || null;
-      await generateInitialPlanFromAI({silent:false, fallbackDefault:true});
-      toast(profile().planMeta?.source==='ai' ? 'Novo perfil local criado com treino específico.' : 'Novo perfil local criado com treino padrão por fallback.');
-    }catch(e){
-      applyDefaultPlanForProfile(profile(), true);
-      toast('Novo perfil local criado. Não consegui usar a IA, então apliquei treino padrão.');
-    }
-  }else{
-    applyDefaultPlanForProfile(profile(), true);
-    toast('Novo perfil local criado offline. Apliquei treino padrão por enquanto.');
-  }
-  screen='home';
-  render();
-}
-
-function hasWorkoutPlan(p){ return Array.isArray(p?.workouts) && p.workouts.length && Array.isArray(p?.queue) && p.queue.length; }
-
-function dayIndexBR(d=new Date()){
-  return d.getDay();
-}
-function lessonDayLabel(day){
-  return ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][Number(day)||0] || 'Seg';
-}
-function lessonTypeOptions(){
-  return ['Yoga','Pilates','Spinning','Power Local','GAP','Funcional','Alongamento','Dança','Luta','Outra'];
-}
-function lessonIcon(type=''){
-  const s=String(type).toLowerCase();
-  if(s.includes('yoga')) return '🧘';
-  if(s.includes('pilates')) return '🤸';
-  if(s.includes('spinning')) return '🚴';
-  if(s.includes('gap')) return '🍑';
-  if(s.includes('power')) return '💪';
-  if(s.includes('luta')) return '🥊';
-  if(s.includes('dança') || s.includes('danca')) return '💃';
-  if(s.includes('along')) return '🧘';
-  return '⚡';
-}
-function lessonsToday(p=profile()){
-  ensureProfile(p);
-  const d=dayIndexBR();
-  return (p.lessons||[]).filter(a=>Number(a.day)===d).sort((a,b)=>String(a.time||'').localeCompare(String(b.time||'')));
-}
-function lessonDoneToday(p=profile(), lessonId=''){
-  const key=dateKey();
-  return (p.lessonLogs||[]).some(l=>l.lessonId===lessonId && l.dateKey===key);
-}
-function lessonTodayHTML(p=profile()){
-  const list=lessonsToday(p);
-  if(!list.length) return '';
-  return `<section class="card compact-card lessons-today-card"><div class="card-title"><div><h3>Aulas de hoje</h3><p>Atividades guiadas também contam para sua rotina.</p></div><span class="badge orange">Aulas</span></div>
-    <div class="lesson-list mini">${list.map(a=>`<div class="lesson-row"><div><strong>${lessonIcon(a.type)} ${esc(a.type||a.name||'Aula')}</strong><span>${esc(a.time||'--:--')} • ${esc(a.duration||'')} min • ${esc(a.intensity||'Média')}</span></div><button class="btn sm ${lessonDoneToday(p,a.id)?'green':'secondary'}" data-complete-lesson="${esc(a.id)}">${lessonDoneToday(p,a.id)?'Feita':'Concluir'}</button></div>`).join('')}</div>
-  </section>`;
-}
-function renderLessons(){
-  const p=profile(); ensureProfile(p);
-  const today=lessonsToday(p);
-  const logs=[...(p.lessonLogs||[])].slice(-8).reverse();
-  const byDay=[1,2,3,4,5,6,0].map(d=>({day:d, items:(p.lessons||[]).filter(a=>Number(a.day)===d).sort((a,b)=>String(a.time||'').localeCompare(String(b.time||'')))}));
-  return `<section class="card"><div class="card-title"><div><h3>Aulas</h3><p>Yoga, Pilates, Spinning, Power Local, GAP e outras atividades sem complicar.</p></div><button class="btn sm" data-action="add-lesson">Adicionar aula</button></div>
-    ${today.length?`<div class="lesson-list">${today.map(a=>lessonRowHTML(p,a,true)).join('')}</div>`:`<div class="empty"><strong>Nenhuma aula para hoje.</strong><br>Adicione sua grade semanal para aparecer aqui e na tela Hoje.</div>`}
-  </section>
-  <section class="card"><div class="card-title"><div><h3>Grade semanal</h3><p>Organize aulas fixas da academia ou estúdio.</p></div><span class="badge yellow">Sem séries</span></div>
-    <div class="weekly-lessons">${byDay.map(g=>`<div class="lesson-day"><h4>${lessonDayLabel(g.day)}</h4>${g.items.length?g.items.map(a=>lessonRowHTML(p,a,false)).join(''):'<p class="muted">Sem aula</p>'}</div>`).join('')}</div>
-  </section>
-  <section class="card"><div class="card-title"><div><h3>Histórico de aulas</h3><p>Últimas aulas concluídas.</p></div><span class="badge green">Atividade</span></div>
-    ${logs.length?`<div class="history-list">${logs.map(l=>`<div class="history-row"><div><b>${lessonIcon(l.type)} ${esc(l.type||l.name||'Aula')}</b><span>${fmtDate(l.date)} às ${fmtTime(l.date)} • ${esc(l.duration||'')} min • ${esc(l.intensity||'Média')}</span></div><strong>${esc(l.effort||'Feita')}</strong></div>`).join('')}</div>`:'<div class="empty">Nenhuma aula concluída ainda.</div>'}
-  </section>`;
-}
-function lessonRowHTML(p,a,isToday=false){
-  const done=isToday && lessonDoneToday(p,a.id);
-  return `<div class="lesson-row"><div><strong>${lessonIcon(a.type)} ${esc(a.type||a.name||'Aula')}</strong><span>${lessonDayLabel(a.day)} • ${esc(a.time||'--:--')} • ${esc(a.duration||'')} min • ${esc(a.intensity||'Média')}${a.notes?' • '+esc(a.notes):''}</span></div><div class="actions inline-actions">${isToday?`<button class="btn sm ${done?'green':'secondary'}" data-complete-lesson="${esc(a.id)}">${done?'Concluída':'Concluir'}</button>`:''}<button class="btn sm secondary" data-edit-lesson="${esc(a.id)}">Editar</button><button class="btn sm danger" data-delete-lesson="${esc(a.id)}">Excluir</button></div></div>`;
-}
-function openLessonModal(id=''){
-  const p=profile(); ensureProfile(p);
-  const editing=(p.lessons||[]).find(a=>a.id===id) || null;
-  const layer=byId('modalLayer');
-  layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Aulas</p><h2>${editing?'Editar aula':'Adicionar aula'}</h2><p class="muted">Use para Yoga, Pilates, Spinning, GAP, Power Local e outras aulas.</p></div><button class="close" data-close>×</button></div>
-    <div class="form-grid">
-      <div class="field"><label>Tipo</label><select class="select" id="lessonType">${lessonTypeOptions().map(x=>`<option ${editing?.type===x?'selected':''}>${x}</option>`).join('')}</select></div>
-      <div class="field"><label>Nome opcional</label><input class="input" id="lessonName" value="${esc(editing?.name||'')}" placeholder="ex: Pilates solo"></div>
-      <div class="field"><label>Dia</label><select class="select" id="lessonDay">${[1,2,3,4,5,6,0].map(d=>`<option value="${d}" ${Number(editing?.day??dayIndexBR())===d?'selected':''}>${lessonDayLabel(d)}</option>`).join('')}</select></div>
-      <div class="field"><label>Horário</label><input class="input" id="lessonTime" type="time" value="${esc(editing?.time||'19:00')}"></div>
-      <div class="field"><label>Duração</label><input class="input" id="lessonDuration" type="number" value="${esc(editing?.duration||'50')}" placeholder="min"></div>
-      <div class="field"><label>Intensidade</label><select class="select" id="lessonIntensity">${['Leve','Média','Forte'].map(x=>`<option ${editing?.intensity===x?'selected':''}>${x}</option>`).join('')}</select></div>
-      <div class="field" style="grid-column:1/-1"><label>Observação</label><input class="input" id="lessonNotes" value="${esc(editing?.notes||'')}" placeholder="ex: estúdio, professor, foco..."></div>
-    </div>
-    <div class="actions"><button class="btn" data-save-lesson="${esc(id)}">Salvar aula</button><button class="btn secondary" data-close>Cancelar</button></div></div>`;
-  layer.classList.remove('hidden');
-  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
-  document.querySelector('[data-save-lesson]').onclick=()=>saveLesson(id);
-}
-function saveLesson(id=''){
-  const p=profile(); ensureProfile(p);
-  const obj={
-    id:id || 'lesson_'+Date.now(),
-    type:byId('lessonType').value,
-    name:byId('lessonName').value.trim(),
-    day:Number(byId('lessonDay').value),
-    time:normalizeTimeText(byId('lessonTime').value,'19:00'),
-    duration:String(byId('lessonDuration').value||'50'),
-    intensity:byId('lessonIntensity').value,
-    notes:byId('lessonNotes').value.trim(),
-    updatedAt:nowISO()
-  };
-  const i=p.lessons.findIndex(a=>a.id===obj.id);
-  if(i>=0) p.lessons[i]=obj; else p.lessons.push(obj);
-  p.routine.lessons=p.lessons; p.routine.lessonLogs=p.lessonLogs;
-  save(); if(hasCloudAccount()){ upsertCloudProfile(null).catch(()=>{}); syncLessonScheduleToCloud(obj).then(()=>save()).catch(()=>{}); }
-  closeModal(); toast('Aula salva.'); setScreen('lessons');
-}
-function completeLesson(id){
-  const p=profile(); ensureProfile(p);
-  const a=(p.lessons||[]).find(x=>x.id===id);
-  if(!a) return toast('Aula não encontrada.');
-  if(lessonDoneToday(p,id)) return toast('Essa aula já foi concluída hoje.');
-  const effort=prompt('Como foi a aula? (Leve, Média, Pesada)', a.intensity||'Média') || a.intensity || 'Média';
-  const log={id:'lessonlog_'+Date.now(), lessonId:id, cloudScheduleId:a.cloudScheduleId||null, date:nowISO(), dateKey:dateKey(), type:a.type, name:a.name, duration:a.duration, intensity:a.intensity, effort, notes:a.notes||''};
-  p.lessonLogs.push(log);
-  p.routine.lessons=p.lessons; p.routine.lessonLogs=p.lessonLogs;
-  save(); if(hasCloudAccount()){ upsertCloudProfile(null).catch(()=>{}); syncLessonLogToCloud(log).then(()=>save()).catch(()=>{}); }
-  toast('Aula concluída.'); render();
-}
-function deleteLesson(id){
-  const p=profile(); ensureProfile(p);
-  const a=(p.lessons||[]).find(x=>x.id===id);
-  if(!a) return;
-  if(!confirm(`Excluir a aula ${a.type || a.name || ''}?`)) return;
-  p.lessons=p.lessons.filter(x=>x.id!==id);
-  p.routine.lessons=p.lessons;
-  save(); if(hasCloudAccount()){ upsertCloudProfile(null).catch(()=>{}); deleteLessonScheduleFromCloud(id).catch(()=>{}); }
-  toast('Aula excluída.'); render();
-}
-
-
-function lessonScheduleToCloudRow(userId, a){
-  return {
-    user_id:userId,
-    local_id:a.id || ('lesson_'+Date.now()),
-    class_type:String(a.type || 'Outra'),
-    class_name:a.name || null,
-    weekday:Number(a.day ?? dayIndexBR()),
-    class_time:a.time || null,
-    duration_minutes:parseNumberValue(a.duration),
-    intensity:a.intensity || null,
-    notes:a.notes || null,
-    active:true,
-    updated_at:nowISO()
-  };
-}
-function lessonLogToCloudRow(userId, l){
-  return {
-    user_id:userId,
-    local_id:l.id || ('lessonlog_'+Date.now()),
-    schedule_local_id:l.lessonId || null,
-    schedule_id:l.cloudScheduleId || null,
-    class_type:String(l.type || 'Outra'),
-    class_name:l.name || null,
-    performed_at:l.date || nowISO(),
-    duration_minutes:parseNumberValue(l.duration),
-    intensity:l.intensity || null,
-    effort:l.effort || null,
-    notes:l.notes || null
-  };
-}
-async function syncLessonScheduleToCloud(a){
-  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
-  const user=await getCurrentCloudUser();
-  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
-  try{
-    const row=lessonScheduleToCloudRow(user.id, a);
-    const { data, error } = await supabaseClient
-      .from('class_schedules')
-      .upsert(row, { onConflict:'user_id,local_id' })
-      .select('id')
-      .single();
-    if(error) throw error;
-    a.cloudScheduleId=data?.id || a.cloudScheduleId || null;
-    a.cloudSynced=true;
-    a.cloudSyncedAt=nowISO();
-    return {ok:true, id:a.cloudScheduleId};
-  }catch(e){
-    console.warn('Erro ao sincronizar aula:', e);
-    return {ok:false, error:e};
-  }
-}
-async function syncLessonLogToCloud(l){
-  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
-  const user=await getCurrentCloudUser();
-  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
-  try{
-    const p=profile();
-    const schedule=(p.lessons||[]).find(a=>a.id===l.lessonId);
-    if(schedule?.cloudScheduleId) l.cloudScheduleId=schedule.cloudScheduleId;
-    const row=lessonLogToCloudRow(user.id, l);
-    const { data, error } = await supabaseClient
-      .from('class_logs')
-      .upsert(row, { onConflict:'user_id,local_id' })
-      .select('id')
-      .single();
-    if(error) throw error;
-    l.cloudClassLogId=data?.id || l.cloudClassLogId || null;
-    l.cloudSynced=true;
-    l.cloudSyncedAt=nowISO();
-    return {ok:true, id:l.cloudClassLogId};
-  }catch(e){
-    console.warn('Erro ao sincronizar histórico de aula:', e);
-    return {ok:false, error:e};
-  }
-}
-async function deleteLessonScheduleFromCloud(localId){
-  if(!supabaseClient || !hasCloudAccount() || !localId) return {ok:false, reason:'no_account'};
-  const user=await getCurrentCloudUser();
-  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
-  try{
-    const { error } = await supabaseClient
-      .from('class_schedules')
-      .update({active:false, updated_at:nowISO()})
-      .eq('user_id', user.id)
-      .eq('local_id', localId);
-    if(error) throw error;
-    return {ok:true};
-  }catch(e){
-    console.warn('Erro ao excluir aula da nuvem:', e);
-    return {ok:false, error:e};
-  }
-}
-async function syncLessonsToCloud(opts={}){
-  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
-  const user=await getCurrentCloudUser();
-  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
-  const p=profile(); ensureProfile(p);
-  let schedules=0, logs=0, failed=0;
-  for(const a of (p.lessons||[])){
-    const r=await syncLessonScheduleToCloud(a);
-    if(r.ok) schedules++; else failed++;
-  }
-  for(const l of (p.lessonLogs||[])){
-    const r=await syncLessonLogToCloud(l);
-    if(r.ok) logs++; else failed++;
-  }
-  p.routine.lessons=p.lessons;
-  p.routine.lessonLogs=p.lessonLogs;
-  save();
-  if(!opts.silent) toast(`Aulas sincronizadas: ${schedules} grade, ${logs} histórico.`);
-  return {ok:failed===0, schedules, logs, failed};
-}
-async function loadLessonsFromCloud(opts={}){
-  if(!supabaseClient || !hasCloudAccount()) return {ok:false, reason:'no_account'};
-  const user=await getCurrentCloudUser();
-  if(!user || isAnonymousCloudUser()) return {ok:false, reason:'no_account'};
-  const p=profile(); ensureProfile(p);
-  try{
-    const { data:schedules, error:sErr } = await supabaseClient
-      .from('class_schedules')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('active', true)
-      .order('weekday', {ascending:true})
-      .order('class_time', {ascending:true});
-    if(sErr) throw sErr;
-    const { data:logs, error:lErr } = await supabaseClient
-      .from('class_logs')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('performed_at', {ascending:false})
-      .limit(250);
-    if(lErr) throw lErr;
-
-    const cloudLessons=(schedules||[]).map(r=>({
-      id:r.local_id || r.id,
-      cloudScheduleId:r.id,
-      type:r.class_type || 'Outra',
-      name:r.class_name || '',
-      day:Number(r.weekday ?? 1),
-      time:r.class_time || '',
-      duration:r.duration_minutes ? String(r.duration_minutes) : '',
-      intensity:r.intensity || 'Média',
-      notes:r.notes || '',
-      updatedAt:r.updated_at || r.created_at || nowISO(),
-      cloudSynced:true,
-      cloudSyncedAt:r.updated_at || r.created_at || nowISO()
-    }));
-    const scheduleIdByCloud=new Map(cloudLessons.map(a=>[a.cloudScheduleId, a.id]));
-    const cloudLogs=(logs||[]).map(r=>({
-      id:r.local_id || r.id,
-      cloudClassLogId:r.id,
-      lessonId:r.schedule_local_id || scheduleIdByCloud.get(r.schedule_id) || r.schedule_id || '',
-      cloudScheduleId:r.schedule_id || null,
-      date:r.performed_at || r.created_at || nowISO(),
-      dateKey:dateKey(r.performed_at || r.created_at || nowISO()),
-      type:r.class_type || 'Outra',
-      name:r.class_name || '',
-      duration:r.duration_minutes ? String(r.duration_minutes) : '',
-      intensity:r.intensity || 'Média',
-      effort:r.effort || 'Feita',
-      notes:r.notes || '',
-      cloudSynced:true,
-      cloudSyncedAt:r.created_at || nowISO()
-    })).reverse();
-
-    const lessonMap=new Map();
-    cloudLessons.forEach(a=>lessonMap.set(a.id, a));
-    (p.lessons||[]).forEach(a=>{ if(!lessonMap.has(a.id)) lessonMap.set(a.id, a); });
-    const logMap=new Map();
-    cloudLogs.forEach(l=>logMap.set(l.id, l));
-    (p.lessonLogs||[]).forEach(l=>{ if(!logMap.has(l.id)) logMap.set(l.id, l); });
-    p.lessons=[...lessonMap.values()].sort((a,b)=>Number(a.day)-Number(b.day) || String(a.time||'').localeCompare(String(b.time||'')));
-    p.lessonLogs=[...logMap.values()].sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-    p.routine.lessons=p.lessons;
-    p.routine.lessonLogs=p.lessonLogs;
-    save();
-    await syncLessonsToCloud({silent:true}).catch(()=>{});
-    if(!opts.silent) toast('Aulas carregadas da nuvem.');
-    return {ok:true, loaded:true, schedules:p.lessons.length, logs:p.lessonLogs.length};
-  }catch(e){
-    console.warn('Erro ao carregar aulas da nuvem:', e);
-    return {ok:false, error:e};
-  }
-}
-
-function renderPlanActions(p){
-  const source = p.planMeta?.source || 'pending';
-  const needsChoice = source === 'default' && p.planMeta?.needsDefaultChoice;
-  if(source === 'pending' || !hasWorkoutPlan(p)){
-    return `<div class="actions"><button class="btn sm" data-action="generate-initial-plan">Gerar treino específico</button><button class="btn sm secondary" data-action="use-default-plan">Usar treino padrão</button></div>`;
-  }
-  if(needsChoice){
-    return `<div class="actions"><button class="btn sm" data-action="generate-initial-plan">Atualizar treino para específico</button><button class="btn sm secondary" data-action="accept-default-plan">Ficar com treino default</button></div>`;
-  }
-  return `<div class="actions"><button class="btn sm secondary" data-action="generate-initial-plan">Criar treino inteligente</button><button class="btn sm ${p.progress>=workoutsPerCycle(p)?'':'secondary'}" ${p.progress>=workoutsPerCycle(p)?'':'disabled'} data-action="finish-cycle-ai">Revisar próximo ciclo</button></div>`;
-}
-function renderHome(){
-  const p = profile();
-  const hasPlan = hasWorkoutPlan(p);
-  const w = hasPlan ? currentWorkout(p) : null;
-  const cycles = currentCycleNumber(p);
-  const planSource = p.planMeta?.source || 'pending';
-  const planBadge = planSource==='ai' ? 'IA' : planSource==='default' ? 'Padrão' : 'Pendente';
-  const planBadgeClass = planSource==='ai' ? 'green' : planSource==='default' ? 'orange' : 'yellow';
-  return `
-    ${todayMissionHTML(p)}
-    ${levelHeaderHTML(p)}
-    ${nextCommitmentHTML(p)}
-    ${lessonTodayHTML(p)}
-    <section class="card plan-card compact-plan">
-      <div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title || 'Aguardando treino inteligente')} • ${esc(p.programLabel || programLabelForProfile(p))} • Ciclo ${p.planMeta?.cycle || Math.max(1, cycles+1)}</p></div><span class="badge ${planBadgeClass}">${planBadge}</span></div>
-      <p class="muted">${esc(p.planMeta?.notes || (hasPlan ? 'Use os dados dos treinos para ajustar o próximo ciclo.' : 'Nenhum treino foi carregado ainda. Gere um treino específico com IA ou use o treino padrão.'))}</p>
-      ${renderPlanActions(p)}
-    </section>
-    ${hasPlan ? `<section class="card">
-      <div class="card-title"><h3>Próximo treino</h3><span class="badge orange">${w.id}</span></div>
-      <div class="workout-card current" data-open-workout="${w.id}">
-        <div class="workout-left"><div class="letter">${w.id}</div><div class="workout-name"><strong>${esc(w.name)}</strong><span>${w.exercises.length} exercícios • ${esc(w.focus)}</span></div></div>
-        <span>›</span>
-      </div>
-    </section>` : `<section class="card"><div class="empty"><strong>Nenhum treino ativo ainda.</strong><br>O Gym Bronze vai tentar criar um treino específico com IA. Se der erro, você ainda pode usar o treino padrão para começar.</div></section>`}
-    <section class="grid three">
-      <div class="stat"><strong>${cycles}</strong><span>ciclos completos</span></div>
-      <div class="stat"><strong>${p.history.length}</strong><span>treinos no histórico</span></div>
-      <div class="stat"><strong>${p.checkins.length}</strong><span>check-ins salvos</span></div>
-    </section>
-    ${hasPlan ? `<section class="card">
-      <div class="card-title"><h3>Fila atual</h3><p>Somente o primeiro treino da fila pode ser concluído</p></div>
-      <div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div>
-    </section>` : ''}
-    ${p.history.length ? `<section class="card"><div class="card-title"><h3>Último treino</h3></div>${historyRowHTML(p.history[p.history.length-1])}</section>` : ''}
-  `;
-}
-function pendingHTML(p){ return ''; }
-function workoutQueueCard(p,id,current=false){ const w=workoutById(p,id); if(!w) return ''; return `<div class="workout-card ${current?'current':''}" data-open-workout="${id}"><div class="workout-left"><div class="letter">${id}</div><div class="workout-name"><strong>${esc(w.name)}</strong><span>${current?'Liberado para concluir':'Modo consulta'} • ${w.exercises.length} exercícios</span></div></div><span class="badge ${current?'orange':''}">${current?'Atual':'Bloqueado'}</span></div>`; }
-function renderWorkouts(){ const p=profile(); if(!hasWorkoutPlan(p)) return `<section class="card"><div class="card-title"><div><h3>Nenhum treino ativo</h3><p>Gere um treino específico ou use o treino padrão para começar.</p></div></div><div class="actions"><button class="btn" data-action="generate-initial-plan">Gerar treino específico</button><button class="btn secondary" data-action="use-default-plan">Usar treino padrão</button></div></section>`; return `<section class="card"><div class="card-title"><div><h3>Treinos</h3><p>Você pode abrir todos, mas só conclui o treino da ordem.</p></div><div class="actions inline-actions"><button class="btn sm" data-action="today-workout-center">Treino de hoje</button><button class="btn sm secondary" data-action="edit-current-workout">Editar fixo</button></div></div><div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div></section><section class="card pro-tip"><div><span class="badge orange">PRO</span><h3>Editor liberado</h3><p>Agora você pode editar exercícios, ordem, nome, tipo e meta de reps direto no app.</p></div></section>`; }
-
-function renderProgress(){
-  const p=profile(); const gains = exerciseGains(p); const cycles=currentCycleNumber(p); const levelInfo=levelFromXp(ensureGamification(p).xp);
-  return `<section class="hero"><div class="hero-row"><div><p class="eyebrow">Evolução</p><h2>${p.progress}/${p.target} treinos</h2><p>${cycles} ciclos completos. Acompanhe cargas, consistência e estagnações.</p></div><div class="progress-ring" style="--p:${Math.round(p.progress/p.target*100)}%"><div class="progress-ring-inner">${p.progress}<small>treinos</small></div></div></div></section>
-  <section class="card level-progress-card"><div class="card-title"><div><h3>${esc(levelInfo.rank.name)}</h3><p>Nível ${levelInfo.roman} (${levelInfo.level}) • ${levelInfo.xp} XP totais</p></div><button class="btn sm secondary" data-action="open-levels">Ver patentes</button></div><div class="xp-bar big"><i style="width:${levelInfo.pct}%"></i></div><p class="muted">${levelInfo.level>=100?'Você chegou ao topo do Gym Bronze.':'Faltam '+levelInfo.toNext+' XP para o nível '+roman(levelInfo.level+1)+'.'}</p></section>
-  <section class="grid two"><div class="stat"><strong>${gains.filter(g=>g.delta>0).length}</strong><span>exercícios com evolução</span></div><div class="stat"><strong>${stagnated(p).length}</strong><span>possíveis estagnados</span></div></section>
-  <section class="card"><div class="card-title"><h3>Top evolução de carga</h3><p>Comparando primeiro e último registro</p></div>${gains.length?gains.slice(0,8).map(g=>`<div class="history-row"><div><strong>${esc(g.name)}</strong><span>${g.first} → ${g.last}</span></div><span class="badge green">+${g.delta}</span></div>`).join(''):'<div class="empty">Ainda não há histórico suficiente.</div>'}</section>
-  <section class="card"><div class="card-title"><h3>Últimos treinos</h3></div>${p.history.slice(-8).reverse().map(h=>historyRowHTML(h)).join('') || '<div class="empty">Nenhum treino finalizado ainda.</div>'}</section>`;
-}
-function exerciseGains(p){
-  const first={}, last={};
-  p.history.forEach(h=>Object.entries(h.weights||{}).forEach(([id,val])=>{ const n=parseFloat(String(val).replace(',','.')); if(!isNaN(n)){ if(first[id]===undefined) first[id]=n; last[id]=n; }}));
-  const exs=allExercises(p); return Object.keys(last).map(id=>{const e=exs.find(x=>x.id===id); return {id,name:e?.name||id,first:first[id],last:last[id],delta:+(last[id]-first[id]).toFixed(2)}}).filter(x=>x.delta>0).sort((a,b)=>b.delta-a.delta);
-}
-function stagnated(p){
-  const recent = p.history.slice(-15), map={};
-  recent.forEach(h=>Object.entries(h.weights||{}).forEach(([id,val])=>{ if(!map[id]) map[id]=[]; map[id].push(val); }));
-  return Object.entries(map).filter(([id,arr])=>arr.length>=3 && new Set(arr.slice(-3).map(String)).size===1).map(([id])=>id);
-}
-
-function renderCheckin(){
-  const p=profile();
-  const todayDaily=dailyCheckinToday(p);
-  return `<section class="card"><div class="card-title"><div><h3>Check-in diário</h3><p>Sono, energia, dor, fome e estresse. Ajuda a IA a ajustar treino e nutri.</p></div><span class="badge ${todayDaily?'green':'yellow'}">${todayDaily?'Hoje feito':'Pendente'}</span></div>
-    <div class="actions"><button class="btn" data-action="daily-checkin">${todayDaily?'Editar check-in de hoje':'Fazer check-in rápido'}</button></div>
-    ${recentDailyCheckins(p,7).length?`<div class="daily-list">${recentDailyCheckins(p,7).map(c=>`<div class="history-row"><div><strong>${fmtDate(c.date)} — ${readinessLabel(c)}</strong><span>Score ${c.readinessScore}% • Sono ${c.sleep}/5 • Energia ${c.energy}/5 • Dor ${c.pain}/5 • Estresse ${c.stress}/5</span>${c.notes?`<p class="muted">${esc(c.notes)}</p>`:''}</div><span class="badge orange">${fmtTime(c.date)}</span></div>`).join('')}</div>`:'<div class="empty">Nenhum check-in diário ainda.</div>'}
-  </section>
-  <section class="card"><div class="card-title"><h3>Check-in físico</h3><p>Fotos e dados corporais por ciclo.</p></div>
-    <div class="actions"><button class="btn" data-action="new-checkin">Novo check-in</button><button class="btn secondary" data-action="new-bio">Inserir bioimpedância</button></div>
-  </section>
-  <section class="card"><div class="card-title"><h3>Fotos por ciclo</h3></div>${p.checkins.length?`<div class="grid">${p.checkins.slice().reverse().map(c=>`<div class="stat"><strong>Ciclo ${c.cycle}</strong><span>${fmtDate(c.date)} • ${c.weight?c.weight+' kg':''}</span><div class="timeline">${['front','side','back'].map(k=>c.photos?.[k]?`<img class="mini-photo" src="${c.photos[k]}" alt="${k}">`:'' ).join('')}</div></div>`).join('')}</div>`:'<div class="empty">Nenhum check-in salvo ainda.</div>'}</section>
-  <section class="card"><div class="card-title"><h3>Bioimpedância / medidas</h3></div>${p.bio.length?p.bio.slice().reverse().map(b=>`<div class="history-row"><div><strong>${fmtDate(b.date)} — ${b.weight||'--'} kg</strong><span>Gordura: ${b.bodyFat||'--'}% • Massa magra: ${b.leanMass||'--'} kg • Cintura: ${b.waist||'--'} cm</span></div><span class="badge orange">Bio</span></div>`).join(''):'<div class="empty">Nenhuma avaliação inserida.</div>'}</section>`;
-}
-
-function renderDietPlanHTML(diet){
-  if(!diet) return '<div class="empty">Nenhuma rotina alimentar gerada ainda.</div>';
-  const schedule = dietMeals(diet);
-  const scheduleHTML = schedule.length ? `<div class="meal-timeline">${schedule.map(m=>`<div class="meal-item"><div class="meal-time">${esc(m.time || '')}</div><div><strong>${esc(m.title || 'Refeição')}</strong><p>${esc(m.text || '')}</p>${m.portions?`<span>${esc(m.portions)}</span>`:''}${m.notes?`<em>${esc(m.notes)}</em>`:''}</div></div>`).join('')}</div>` : '';
-  return `<div class="ai-report diet-report"><strong>${esc(diet.title||'Rotina alimentar')}</strong><p>${esc(diet.summary||'')}</p>${diet.guidelines?`<p><b>Diretrizes:</b> ${esc(Array.isArray(diet.guidelines)?diet.guidelines.join(' • '):diet.guidelines)}</p>`:''}${scheduleHTML || '<p class="muted">Rotina alimentar salva, mas sem horários estruturados detectados.</p>'}${diet.shoppingList?`<p><b>Base de compras:</b> ${esc(Array.isArray(diet.shoppingList)?diet.shoppingList.join(' • '):diet.shoppingList)}</p>`:''}${diet.attention?`<p><b>Atenção:</b> ${esc(diet.attention)}</p>`:''}</div>`;
-}
-function renderCoach(){
-  const p=profile(); const insights=generateInsights(p); const aiOn=canUseOnlineAI(); const reports=p.history.filter(h=>h.aiReport || h.aiReportStatus || h.aiReportError).slice(-5).reverse();
-  const diet = p.dietPlan;
-  return `<section class="hero"><p class="eyebrow">Nutri & Análise</p><h2>Rotina, evolução e ajustes</h2><p>${aiOn?'IA online pronta para revisar treino, ciclo e alimentação.':(isOffline()?'Você está offline. A análise local funciona, mas IA e nuvem ficam pausadas.':'Entre na conta ou use modo local para liberar os recursos inteligentes.')}</p><div class="actions"><button class="btn secondary" data-screen-go="profile">Configurar conta</button></div></section>
-  <section class="card"><div class="card-title"><h3>Status dos recursos inteligentes</h3><span class="badge ${aiOn?'green':'yellow'}">${aiOn?'Online':(isOffline()?'Offline':'Login necessário')}</span></div><p class="muted">Relatório automático ao finalizar treino: <strong>${p.ai?.autoWorkoutReport?'ativado':'desativado'}</strong></p><p class="muted">Limite diário controlado no backend por usuário para evitar abuso.</p></section>
-  <section class="card"><div class="card-title"><div><h3>Rotina alimentar</h3><p>Plano educativo baseado no seu perfil, objetivo e treino. Não substitui nutricionista.</p></div><span class="badge orange">Beta</span></div>
-    ${renderDietPlanHTML(diet)}
-    ${diet ? `<p class="muted">Status na nuvem: <strong>${diet.cloudSynced?'salva':'não salva'}</strong>${!hasCloudAccount()?' • crie uma conta para sincronizar':''}</p>` : ''}
-    <div class="actions"><button class="btn" data-action="generate-diet-plan">Gerar rotina alimentar</button>${hasCloudAccount() ? '<button class="btn secondary" data-action="load-diet-cloud">Atualizar nutri da nuvem</button>' : ''}${diet && hasCloudAccount() && !diet.cloudSynced ? '<button class="btn secondary" data-action="save-diet-cloud">Salvar rotina na nuvem</button>' : ''}</div>
-  </section>
-  <section class="card" id="nutritionChecklistCard"><div class="card-title"><div><h3>Checklist de nutrição</h3><p>Marque as refeições feitas hoje. Isso entra no score do dia.</p></div><span class="badge green">${nutritionStats(p).pct}% hoje</span></div>
-    ${renderNutritionChecklistHTML(p)}
-    <div class="actions"><button class="btn secondary" data-action="reset-nutrition-today">Limpar hoje</button>${hasCloudAccount()?'<button class="btn secondary" data-action="save-diet-cloud">Salvar nutri na nuvem</button>':''}</div>
-  </section>
-  <section class="grid">${insights.map(i=>`<div class="alert ${i.type==='orange'?'orange':''}"><div>${i.icon}</div><div><strong>${esc(i.title)}</strong><p>${esc(i.text)}</p></div></div>`).join('')}</section>
-  <section class="card"><div class="card-title"><h3>Últimos relatórios</h3><p>Gerados ao finalizar treino</p></div>${reports.length?reports.map(h=>aiHistoryHTML(h)).join(''):'<div class="empty">Nenhum relatório salvo ainda.</div>'}</section>`;
-}
-function generateInsights(p){
-  const out=[]; const cycles=currentCycleNumber(p); const st=stagnated(p);
-  out.push({icon:'🔥',title:`${p.progress}/${p.target} treinos concluídos`,text:`Você completou ${cycles} ciclos. Próxima meta: ${Math.min(p.target, (cycles+1)*workoutsPerCycle(p))} treinos.`,type:'orange'});
-  if(st.length) out.push({icon:'⚠️',title:'Possível estagnação de carga',text:`Há ${st.length} exercício(s) com mesma carga nos últimos registros. Se a execução estiver boa, planeje subir pouco ou melhorar reps.`,type:'orange'});
-  const skipped = p.history.slice(-5).reduce((a,h)=>a+(h.skippedCount||0),0); if(skipped) out.push({icon:'🟡',title:'Exercícios pulados recentemente',text:`Nos últimos 5 treinos, você pulou ${skipped} exercício(s). Veja se isso está atrapalhando ombro/costas.`,type:'orange'});
-  const lateralSkipped = p.history.slice(-12).some(h=>h.status?.d3==='skipped' || h.status?.d3===undefined && h.workoutId==='D'); if(lateralSkipped) out.push({icon:'💪',title:'Prioridade para ombro lateral',text:'Não deixe a elevação lateral na polia/máquina virar opcional. Ela é uma das chaves para ombro mais largo.',type:'orange'});
-  if(p.bio.length>=2){ const a=p.bio[p.bio.length-2], b=p.bio[p.bio.length-1]; out.push({icon:'📊',title:'Bioimpedância comparada',text:compareBio(a,b),type:'orange'}); }
-  if(!p.checkins.length) out.push({icon:'📸',title:'Comece os check-ins visuais',text:'Ao fechar cada ciclo, tire fotos de frente, lado e costas nas mesmas condições para comparar evolução.'});
-  return out;
-}
-function compareBio(a,b){ const parts=[]; [['weight','Peso','kg'],['bodyFat','Gordura','%'],['leanMass','Massa magra','kg'],['waist','Cintura','cm']].forEach(([k,n,u])=>{const x=parseFloat(a[k]), y=parseFloat(b[k]); if(!isNaN(x)&&!isNaN(y)){ const d=+(y-x).toFixed(1); parts.push(`${n}: ${d>0?'+':''}${d}${u}`); }}); return parts.length?parts.join(' • '):'Duas avaliações salvas; preencha mais campos para comparação melhor.'; }
-
-function aiHistoryHTML(h){
-  const badge = h.aiReportStatus==='pending' ? '<span class="badge yellow">Gerando</span>' : h.aiReportError ? '<span class="badge red">Erro</span>' : '<span class="badge green">IA</span>';
-  const body = h.aiReport ? `<div class="ai-report"><strong>${esc(h.aiReport.title||'Relatório da IA')}</strong><p>${esc(h.aiReport.summary||'')}</p>${h.aiReport.evolution?`<p><b>Evolução:</b> ${esc(h.aiReport.evolution)}</p>`:''}${h.aiReport.attention?`<p><b>Atenção:</b> ${esc(h.aiReport.attention)}</p>`:''}${h.aiReport.nextGoal?`<p><b>Próxima meta:</b> ${esc(h.aiReport.nextGoal)}</p>`:''}</div>` : h.aiReportError ? `<div class="ai-report error"><strong>Erro ao gerar IA</strong><p>${esc(h.aiReportError)}</p></div>` : '<div class="ai-report"><p>Relatório em processamento...</p></div>';
-  return `<div class="history-row ai-row"><div><strong>${h.workoutId} — ${esc(h.workoutName)}</strong><span>${fmtDate(h.date)}</span>${body}</div>${badge}</div>`;
-}
-function historyRowHTML(h){
-  const aiBadge = h.aiReport ? '<span class="badge green">IA</span>' : h.aiReportStatus==='pending' ? '<span class="badge yellow">IA...</span>' : h.aiReportError ? '<span class="badge red">IA erro</span>' : '';
-  const report = h.aiReport ? `<div class="ai-report compact"><p>${esc(h.aiReport.summary||'Relatório salvo.')}</p>${h.aiReport.nextGoal?`<p><b>Meta:</b> ${esc(h.aiReport.nextGoal)}</p>`:''}</div>` : '';
-  const timeInfo = h.startedAt ? `${fmtDate(h.date)} • ${fmtTime(h.startedAt)}–${fmtTime(h.finishedAt||h.date)}${h.durationMinutes!==undefined ? ' • '+h.durationMinutes+' min' : ''}` : `${fmtDate(h.date)} • ${fmtTime(h.date)}`;
-  return `<div class="history-row"><div><strong>${h.workoutId} — ${esc(h.workoutName)}</strong><span>${timeInfo} • ${h.doneCount} concluídos • ${h.skippedCount} pulados</span>${report}</div><div class="badge-stack"><span class="badge">${h.score}%</span>${aiBadge}</div></div>`;
-}
-
-
-
-function remindersPanelHTML(p){
-  ensureProfile(p);
-  const routine=p.routine||{};
-  const reminders=p.reminders||{};
-  const types=reminders.types||{};
-  const times=reminders.times||{};
-  const water=reminders.water||{};
-  const permission = notificationAvailable() ? (Notification.permission || 'default') : 'unsupported';
-  const permissionLabel = permission==='granted' ? 'permitidas' : permission==='denied' ? 'bloqueadas' : permission==='unsupported' ? 'não suportadas' : 'não ativadas';
-  return `<div class="routine-panel">
-    <div class="form-grid">
-      <div class="field"><label>Que horas você acorda?</label><input class="input" type="time" data-profile-field="routine.wakeTime" value="${esc(routine.wakeTime||'09:00')}"></div>
-      <div class="field"><label>Almoço médio</label><input class="input" type="time" data-profile-field="routine.lunchTime" value="${esc(routine.lunchTime||'13:00')}"></div>
-      <div class="field"><label>Jantar médio</label><input class="input" type="time" data-profile-field="routine.dinnerTime" value="${esc(routine.dinnerTime||'20:00')}"></div>
-      <div class="field"><label>Horário de treino</label><input class="input" type="time" data-profile-field="reminders.times.workout" value="${esc(times.workout||suggestedWorkoutTimeFromRoutine(p)||'12:00')}"></div>
-      <div class="field"><label>Água: início</label><input class="input" type="time" data-profile-field="reminders.water.start" value="${esc(water.start||routine.wakeTime||'09:00')}"></div>
-      <div class="field"><label>Água: fim</label><input class="input" type="time" data-profile-field="reminders.water.end" value="${esc(water.end||'21:00')}"></div>
-      <div class="field"><label>Água: intervalo</label><select class="select" data-profile-field="reminders.water.intervalHours">
-        ${[1,2,3,4].map(n=>`<option value="${n}" ${Number(water.intervalHours||2)===n?'selected':''}>a cada ${n}h</option>`).join('')}
-      </select></div>
-      <div class="stat"><strong>${esc(workoutTimeRecommendation(p).window)}</strong><span>sugestão de treino</span></div>
-      <div class="field" style="grid-column:1/-1"><label>Quer contar como funciona seu dia útil?</label><textarea data-profile-field="routine.workdayDescription" placeholder="ex: acordo tarde, trabalho no computador, treino perto do almoço...">${esc(routine.workdayDescription||'')}</textarea></div>
-    </div>
-    <div class="reminder-checks">
-      <label class="legal-check"><input type="checkbox" data-reminder-type="workout" ${types.workout?'checked':''}> <span>Lembrete de treino</span></label>
-      <label class="legal-check"><input type="checkbox" data-reminder-type="meals" ${types.meals?'checked':''}> <span>Lembretes de refeição</span></label>
-      <label class="legal-check"><input type="checkbox" data-reminder-type="water" ${types.water?'checked':''}> <span>Lembrete de beber água</span></label>
-    </div>
-    <p class="muted">Resumo: ${esc(remindersSummary(p))} • Permissão neste aparelho: ${esc(permissionLabel)}.</p><div class="actions"><button class="btn sm secondary" data-action="suggest-workout-time">Sugerir melhor horário de treino</button></div>
-  </div>`;
-}
-
-function renderProfile(){
-  const p=profile();
-  const ai=p.ai||{};
-  const levelInfo=levelFromXp(ensureGamification(p).xp);
-  const accountLabel = p.accountEmail || cloudUser?.email || 'Conta local';
-  return `<section class="card profile-level-card">
-    <div class="card-title">
-      <div><p class="eyebrow">Warrior</p><h3>${esc(p.name || 'Meu perfil')}</h3><p>${esc(accountLabel)}</p><p>${esc(levelInfo.rank.name)} • Nv. ${levelInfo.roman} (${levelInfo.level})</p></div>
-      <div class="level-badge big">${esc(levelInfo.rank.icon)}</div>
-    </div>
-    <div class="xp-bar big"><i style="width:${levelInfo.pct}%"></i></div>
-    <p class="muted">${levelInfo.level>=100?'Mr. Gym Bronze desbloqueado.':'Faltam '+levelInfo.toNext+' XP para o próximo nível.'} ${hasCloudAccount()?'XP sincronizável na nuvem.':'XP salvo neste aparelho.'}</p>
-    <div class="actions"><button class="btn sm secondary" data-action="open-levels">Ver patentes</button><button class="btn sm secondary" data-action="account-switch">Alternar conta</button>${hasCloudAccount()?'<button class="btn sm secondary" data-action="sync-xp-cloud">Salvar XP na nuvem</button>':''}</div>
-  </section>
-
-  <details class="profile-section" open>
-    <summary><span>Dados pessoais</span><small>nome, idade e corpo</small></summary>
-    <section class="card"><div class="form-grid">
-      ${inputHTML('name','Nome',p.name)}
-      ${inputHTML('age','Idade',p.age,'number')}
-      ${selectHTML('sex','Sexo',p.sex,['Homem','Mulher','Outro/Prefiro não informar'])}
-      ${inputHTML('height','Altura',p.height)}
-      ${inputHTML('weight','Peso inicial/atual',p.weight)}
-    </div><div class="actions"><button class="btn" data-action="save-profile">Salvar perfil</button></div></section>
-  </details>
-
-  <details class="profile-section">
-    <summary><span>Objetivo e treino</span><small>foco, nível e dias</small></summary>
-    <section class="card"><div class="form-grid">
-      ${inputHTML('goal','Objetivo',p.goal)}
-      ${inputHTML('focus','Foco',p.focus)}
-      ${selectHTML('experience','Nível',p.experience,['Iniciante','Intermediário','Avançado'])}
-      ${selectHTML('daysPerWeek','Dias por semana',p.daysPerWeek,['2','3','4','5','6'], v=>v+' dias')}
-      <div class="stat"><strong>${esc(p.programLabel || programLabelForProfile(p))}</strong><span>meta do programa</span></div>
-      <div class="field" style="grid-column:1/-1"><label>Observações</label><textarea data-profile-field="notes">${esc(p.notes)}</textarea></div>
-    </div><div class="actions"><button class="btn" data-action="save-profile">Salvar treino/perfil</button></div></section>
-  </details>
-
-  <details class="profile-section">
-    <summary><span>Rotina e lembretes</span><small>treino, refeição e água</small></summary>
-    <section class="card"><div class="card-title"><div><h3>Lembretes inteligentes</h3><p>Use seus horários para organizar nutrição e lembretes. Funciona melhor com o app instalado.</p></div><span class="badge orange">v7.3</span></div>
-      ${remindersPanelHTML(p)}
-      <div class="actions"><button class="btn" data-action="save-profile">Salvar rotina</button><button class="btn secondary" data-action="request-notifications">Ativar notificações</button><button class="btn secondary" data-action="test-notification">Testar notificação</button></div>
-      <p class="muted">No PWA, lembretes locais dependem do navegador. Push real com servidor pode entrar em uma versão futura.</p>
-    </section>
-  </details>
-
-  <details class="profile-section">
-    <summary><span>Conta e sincronização</span><small>nuvem, backup e troca</small></summary>
-    <section class="card"><div class="card-title"><div><h3>Conta</h3><p>Sincronize histórico, treino, nutri e XP na nuvem.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}<div class="divider"></div><div class="actions"><button class="btn secondary" data-action="account-switch">Alternar conta</button><button class="btn secondary" data-action="new-profile">Adicionar novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
-  </details>
-
-  <details class="profile-section">
-    <summary><span>IA e relatórios</span><small>automação e análise</small></summary>
-    <section class="card"><div class="card-title"><div><h3>IA online via Vercel</h3><p>Relatórios automáticos e geração inteligente.</p></div><span class="badge green">Pronta</span></div><div class="form-grid">
-      <label class="toggle-row" style="grid-column:1/-1"><input type="checkbox" data-ai-field="autoWorkoutReport" ${ai.autoWorkoutReport?'checked':''}> <span>Gerar relatório automaticamente ao finalizar treino</span></label>
-    </div><div class="actions"><button class="btn" data-action="save-profile">Salvar configuração</button><button class="btn secondary" data-action="test-ai">Testar IA</button></div><p class="muted">A Vercel valida o login Supabase antes de chamar a IA.</p></section>
-  </details>
-
-  <details class="profile-section">
-    <summary><span>Termos e avisos</span><small>beta público</small></summary>
-    <section class="card legal-card"><div class="card-title"><div><h3>Termos e avisos</h3><p>Transparência para uso público.</p></div><span class="badge yellow">Beta</span></div><div class="legal-text"><p>O Gym Bronze é uma ferramenta de organização, treino e análise. Ele não substitui personal trainer, nutricionista, médico ou fisioterapeuta.</p><p>As sugestões de treino e alimentação são educativas. Interrompa o exercício em caso de dor forte, tontura, falta de ar incomum ou desconforto relevante.</p><p>Dados como idade, peso, altura, objetivo, observações, treinos e relatórios podem ser enviados para serviços externos de IA quando você usa recursos inteligentes.</p></div></section>
-  </details>
-
-  <section class="card danger-zone"><div class="card-title"><div><h3>Zona de segurança</h3><p>Ações de saída, limpeza e exclusão ficam aqui.</p></div></div><div class="actions">${hasCloudAccount()?'<button class="btn secondary danger-soft" data-action="cloud-logout">Sair e limpar este aparelho</button><button class="btn danger" data-action="delete-account">Excluir conta</button>': isLocalMode()?'<button class="btn secondary danger-soft" data-action="local-logout">Sair e apagar perfil local</button>':''}<button class="btn danger" data-action="reset-profile">Resetar perfil ativo</button></div><p class="muted">Sair limpa apenas este aparelho. Excluir conta tenta apagar também os dados da nuvem.</p></section>`;
-}
-
-function renderCloudAccount(p){
-  const synced = p.history.filter(h=>h.cloudSynced).length;
-  const pending = p.history.filter(h=>!h.cloudSynced).length;
-  if(hasCloudAccount()){
-    return `<div class="cloud-panel"><p><b>Conta conectada:</b> ${esc(cloudUser.email||'usuário conectado')}</p><p class="muted">Histórico local: ${p.history.length} treino(s) • Na nuvem: ${synced} • Pendentes: ${pending}</p><div class="actions"><button class="btn" data-action="cloud-sync">Sincronizar tudo com a nuvem</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div></div>`;
-  }
-  const upgradeForm = `<div class="form-grid"><div class="field" style="grid-column:1/-1"><label>Nome para criar conta</label><input class="input" id="cloudName" value="${esc(p?.name||'')}"></div><div class="field"><label>E-mail</label><input class="input" id="cloudEmail" type="email" autocomplete="email" placeholder="seu@email.com"></div><div class="field"><label>Senha</label><input class="input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="Maiúscula, número e especial"></div><div class="field"><label>Confirmar senha</label><input class="input" id="cloudPassword2" type="password" autocomplete="new-password" placeholder="repita a senha"></div><label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="cloudAcceptTerms"> <span>Li e aceito os Termos e a Política de Privacidade.</span></label></div><div class="actions"><button class="btn" data-action="cloud-login">Entrar</button><button class="btn secondary" data-action="cloud-signup">Criar conta</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div>`;
-  if(isLocalMode()){
-    return `<div class="cloud-panel"><p><b>Modo local ativo.</b></p><p class="muted">Seus treinos ficam neste aparelho. Para salvar na nuvem, crie uma conta e confirme o e-mail antes de limpar o app.</p><div class="actions"><button class="btn secondary" data-action="cloud-refresh">Atualizar IA/local</button></div></div><div class="alert orange"><div>⚠️</div><div><strong>Antes de limpar</strong><p>Crie uma conta primeiro para sincronizar seus dados. A limpeza local fica na Zona de segurança, no final desta tela.</p></div></div><div class="divider"></div>${upgradeForm}`;
-  }
-  return `${upgradeForm}<p class="muted">Ao criar conta, talvez o Supabase peça confirmação por e-mail. O app sem login continua funcionando normalmente.</p>`;
-}
-function inputHTML(id,label,val,type='text'){ return `<div class="field"><label>${label}</label><input class="input" type="${type}" data-profile-field="${id}" value="${esc(val)}"></div>`; }
-function selectHTML(id,label,val,options,labelFn=(v)=>v){ return `<div class="field"><label>${label}</label><select class="select" data-profile-field="${id}">${options.map(o=>`<option value="${esc(o)}" ${String(val||'')===String(o)?'selected':''}>${esc(labelFn(o))}</option>`).join('')}</select></div>`; }
-
-function bindScreen(){
-  document.querySelectorAll('[data-screen-go]').forEach(el=>el.onclick=()=>setScreen(el.dataset.screenGo));
-  document.querySelectorAll('[data-open-workout]').forEach(el=>el.onclick=()=>openWorkout(el.dataset.openWorkout));
-  document.querySelectorAll('[data-action]').forEach(el=>el.onclick=()=>handleAction(el.dataset.action));
-  document.querySelectorAll('[data-meal-check]').forEach(el=>el.onclick=()=>toggleNutritionMeal(Number(el.dataset.mealCheck)));
-  document.querySelectorAll('[data-switch-profile]').forEach(el=>el.onclick=()=>{state.activeProfileId=el.dataset.switchProfile; save(); render();});
-  document.querySelectorAll('[data-complete-lesson]').forEach(el=>el.onclick=()=>completeLesson(el.dataset.completeLesson));
-  document.querySelectorAll('[data-edit-lesson]').forEach(el=>el.onclick=()=>openLessonModal(el.dataset.editLesson));
-  document.querySelectorAll('[data-delete-lesson]').forEach(el=>el.onclick=()=>deleteLesson(el.dataset.deleteLesson));
-}
 function handleAction(a){
   if(a==='start-current'){ const w=currentWorkout(); if(!w) return toast('Gere um treino primeiro.'); openWorkout(w.id); }
   if(a==='new-profile') createProfileFlow();
@@ -3055,7 +2063,7 @@ function saveProfileForm(doRender=true){
   const p=profile();
   const beforeDays = String(p.daysPerWeek||'');
   const beforeExp = String(p.experience||'');
-  document.querySelectorAll('[data-profile-field]').forEach(f=>setProfileFieldValue(p, f.dataset.profileField, f.value));
+  document.querySelectorAll('[data-profile-field]').forEach(f=>setProfileFieldValue(p, f.dataset.profileField, f.dataset.profileField==='height' ? formatHeightSmart(f.value) : f.value));
   document.querySelectorAll('[data-reminder-type]').forEach(f=>{
     ensureProfile(p);
     p.reminders.types[f.dataset.reminderType]=f.checked;
@@ -3445,7 +2453,11 @@ function openWorkout(id){
 function wireWorkoutModal(){
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
   document.querySelectorAll('[data-weight]').forEach(inp=>inp.oninput=()=>{ const p=profile(); p.weights[inp.dataset.weight]=inp.value; save(); });
-  document.querySelectorAll('[data-rep-ex]').forEach(inp=>inp.oninput=()=>{ normalizeRepsInputsForExercise(inp.dataset.repEx); save(); });
+  document.querySelectorAll('[data-rep-ex]').forEach(inp=>{
+    inp.onfocus=()=>setTimeout(()=>{ try{ inp.select(); }catch(e){} },0);
+    inp.onmouseup=(ev)=>{ ev.preventDefault(); };
+    inp.oninput=()=>{ normalizeRepsInputsForExercise(inp.dataset.repEx); save(); };
+  });
   document.querySelectorAll('[data-meta]').forEach(inp=>inp.oninput=inp.onchange=()=>{ const p=profile(); const id=inp.dataset.exId; if(!p.exerciseMeta[id]) p.exerciseMeta[id]={}; p.exerciseMeta[id][inp.dataset.meta]=inp.value; save(); });
   document.querySelectorAll('[data-cardio-type]').forEach(btn=>btn.onclick=()=>{ const p=profile(); const id=btn.dataset.exId; if(!p.exerciseMeta[id]) p.exerciseMeta[id]={}; p.exerciseMeta[id].cardioType=btn.dataset.cardioType; save(); refreshWorkoutKeepingScroll(); });
   document.querySelectorAll('[data-toggle-ex]').forEach(b=>b.onclick=()=>toggleDone(b.dataset.toggleEx));
@@ -3736,7 +2748,7 @@ async function refreshLocalOrCloudStatus(){
 
 async function cloudLogin(){
   if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
-  const email=byId('cloudEmail')?.value?.trim();
+  const email=cleanEmailInput(byId('cloudEmail')?.value);
   const password=byId('cloudPassword')?.value || '';
   if(!email || !password) return toast('Informe e-mail e senha.');
   const { data, error } = await supabaseClient.auth.signInWithPassword({email,password});
@@ -3759,10 +2771,10 @@ async function cloudSignup(){
   if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
   const p=profile();
   const name=byId('cloudName')?.value?.trim() || p.name || 'Usuário';
-  const email=byId('cloudEmail')?.value?.trim();
+  const email=cleanEmailInput(byId('cloudEmail')?.value);
   const password=byId('cloudPassword')?.value || '';
   const password2=byId('cloudPassword2')?.value || '';
-  if(!email || !email.includes('@')) return toast('Informe um e-mail válido.');
+  if(!isValidEmailInput(email)) return toast('Informe um e-mail válido. Exemplo: nome@gmail.com');
   const passMsg=validateStrongPassword(password);
   if(passMsg) return toast(passMsg);
   if(password !== password2) return toast('As senhas não conferem.');
