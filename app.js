@@ -230,6 +230,7 @@ let state = migrateState(load());
 let screen = 'home';
 let activeModalWorkout = null;
 let onboardingView = 'login';
+let googleStep = 1;
 
 function defaultState(){
   return { activeProfileId: null, profiles: [], version: 5, onboardingDone: false, entryMode: null, pendingEmailVerification: null, pendingProfileCompletion: null };
@@ -1499,15 +1500,36 @@ function renderOnboarding(){
 }
 function renderGoogleCompleteOnboarding(){
   const p=profile() || {};
-  const name=p.name || state.pendingProfileCompletion?.name || '';
-  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Login Google</p><h2>Complete seu perfil</h2><p>Você já entrou com Google. Agora preencha seus dados para o Gym Bronze gerar seu primeiro treino específico.</p></div></section>
-  <section class="auth-center"><div class="card auth-card wide">
-    <div class="card-title"><div><h3>Perfil de treino</h3><p>Esses dados personalizam treino, score e IA.</p></div><span class="badge green">Google conectado</span></div>
-    ${onboardingProfileFields('google')}
-    <label class="legal-check"><input type="checkbox" id="googleAcceptTerms"> <span>Li e aceito os Termos, a Política de Privacidade e entendo que o Gym Bronze não substitui profissionais de saúde, nutrição ou educação física.</span></label>
-    <p class="form-error hidden" id="googleError"></p>
-    <div class="actions"><button class="btn full" data-onboarding="google-complete">Salvar perfil e gerar treino</button><button class="btn secondary full" data-onboarding="google-logout">Sair desta conta Google</button></div>
-    <p class="muted">Conta: ${esc(state.pendingProfileCompletion?.email || p.accountEmail || '')}</p>
+  return `<section class="welcome-hero"><div class="welcome-copy"><p class="eyebrow">Login Google</p><h2>Complete seu perfil</h2><p>Você já entrou com Google. Agora vamos fechar seu perfil em etapas para não ficar poluído.</p></div></section>
+  <section class="auth-center"><div class="card auth-card wide signup-wizard-card">
+    <div class="card-title"><div><h3>Completar conta Google</h3><p>Perfil + rotina + termos. Sem e-mail e senha, porque o Google já cuidou disso.</p></div><span class="badge green">Google conectado</span></div>
+    <div class="signup-progress" aria-label="Progresso do perfil Google">
+      <div class="signup-progress-track"><span id="googleProgressFill"></span></div>
+      <div class="signup-step-dots">
+        <span class="signup-step-dot" data-google-step-dot="1">Perfil</span>
+        <span class="signup-step-dot" data-google-step-dot="2">Rotina</span>
+        <span class="signup-step-dot" data-google-step-dot="3">Finalizar</span>
+      </div>
+    </div>
+    <div class="signup-step-panel" data-google-step="1">
+      <div class="section-head compact"><div><h3>1. Informações pessoais</h3><p>Esses dados personalizam treino, score e IA.</p></div></div>
+      ${onboardingPersonalFields('google')}
+      <p class="form-error hidden" id="googleStep1Error"></p>
+      <div class="actions"><button class="btn full" data-onboarding="google-next" type="button">Próximo</button><button class="btn secondary full" data-onboarding="google-logout" type="button">Sair desta conta Google</button></div>
+    </div>
+    <div class="signup-step-panel" data-google-step="2">
+      <div class="section-head compact"><div><h3>2. Rotina e lembretes</h3><p>Opcional, mas ajuda a IA a organizar dieta, hidratação e horário de treino.</p></div><span class="badge orange">Opcional</span></div>
+      ${onboardingRoutineFields('google')}
+      <p class="form-error hidden" id="googleStep2Error"></p>
+      <div class="actions"><button class="btn full" data-onboarding="google-next" type="button">Próximo</button><button class="btn secondary full" data-onboarding="google-back" type="button">Voltar</button></div>
+    </div>
+    <div class="signup-step-panel" data-google-step="3">
+      <div class="section-head compact"><div><h3>3. Finalizar perfil</h3><p>Confirme os termos para salvar seu perfil e gerar o primeiro treino específico.</p></div></div>
+      <div class="notice-box"><b>Conta Google conectada</b><span>${esc(state.pendingProfileCompletion?.email || p.accountEmail || '')}</span></div>
+      <label class="legal-check"><input type="checkbox" id="googleAcceptTerms"> <span>Li e aceito os Termos, a Política de Privacidade e entendo que o Gym Bronze não substitui profissionais de saúde, nutrição ou educação física.</span></label>
+      <p class="form-error hidden" id="googleError"></p>
+      <div class="actions"><button class="btn full" data-onboarding="google-complete" type="button">Salvar perfil e gerar treino</button><button class="btn secondary full" data-onboarding="google-back" type="button">Voltar</button></div>
+    </div>
   </div></section>`;
 }
 function renderVerifyEmailOnboarding(){
@@ -1638,6 +1660,7 @@ function onboardingProfileFields(prefix){
 function bindOnboarding(){
   document.querySelectorAll('[data-onboarding]').forEach(btn=>btn.onclick=()=>handleOnboarding(btn.dataset.onboarding));
   if(onboardingView==='signup') setSignupStep(signupStep);
+  if(state.pendingProfileCompletion) setGoogleStep(googleStep);
   if(state.pendingProfileCompletion){
     const p=profile() || {};
     const map={Name:p.name||state.pendingProfileCompletion.name||'', Age:p.age||'', Sex:p.sex||'', Height:p.height||'', Weight:p.weight||'', Goal:p.goal||'', Focus:p.focus||'', Experience:p.experience||'Iniciante', Days:p.daysPerWeek||'5', WakeTime:p.routine?.wakeTime||'09:00', LunchTime:p.routine?.lunchTime||'13:00', DinnerTime:p.routine?.dinnerTime||'20:00', WorkoutTime:p.reminders?.times?.workout||'12:00', WorkdayDescription:p.routine?.workdayDescription||'', Notes:p.notes||''};
@@ -1652,6 +1675,8 @@ function handleOnboarding(action){
   if(action==='google-login') return onboardingGoogleLogin();
   if(action==='google-complete') return onboardingGoogleComplete();
   if(action==='google-logout') return googleCompletionLogout();
+  if(action==='google-next') return googleWizardNext();
+  if(action==='google-back') return googleWizardBack();
   if(action==='signup-next') return signupWizardNext();
   if(action==='signup-back') return signupWizardBack();
   if(action==='signup') return onboardingSignup();
@@ -1661,6 +1686,32 @@ function handleOnboarding(action){
   if(action==='verify-local') return useLocalWhileEmailPending();
 }
 
+
+function setGoogleStep(step){
+  googleStep=Math.max(1, Math.min(3, Number(step)||1));
+  document.querySelectorAll('[data-google-step]').forEach(panel=>{
+    panel.classList.toggle('active', Number(panel.dataset.googleStep)===googleStep);
+  });
+  document.querySelectorAll('[data-google-step-dot]').forEach(dot=>{
+    const n=Number(dot.dataset.googleStepDot||0);
+    dot.classList.toggle('active', n===googleStep);
+    dot.classList.toggle('done', n<googleStep);
+  });
+  const fill=byId('googleProgressFill');
+  if(fill) fill.style.width = `${Math.round((googleStep/3)*100)}%`;
+}
+function googleWizardNext(){
+  if(googleStep===1){
+    const msg=validateProfileInfo(readOnboardingProfile('google'));
+    if(msg) return showFormError('googleStep1Error', msg);
+  }
+  setGoogleStep(googleStep+1);
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function googleWizardBack(){
+  setGoogleStep(googleStep-1);
+  window.scrollTo({top:0, behavior:'smooth'});
+}
 
 function setSignupStep(step){
   signupStep=Math.max(1, Math.min(3, Number(step)||1));
@@ -1847,6 +1898,7 @@ async function onboardingGoogleComplete(){
   markLegalAcceptance(p);
   await maybeAskNotificationPermissionForProfile(p);
   state.pendingProfileCompletion=null;
+  googleStep=1;
   state.pendingEmailVerification=null;
   state.onboardingDone=true;
   state.entryMode='account';
@@ -1861,6 +1913,7 @@ async function googleCompletionLogout(){
   if(supabaseClient) await supabaseClient.auth.signOut().catch(()=>{});
   cloudUser=null;
   state.pendingProfileCompletion=null;
+  googleStep=1;
   state.onboardingDone=false;
   state.entryMode=null;
   onboardingView='login';
@@ -1948,6 +2001,7 @@ async function completeVerifiedAccountSession(){
     state.onboardingDone=false;
     state.entryMode='account';
     onboardingView='google-complete';
+    googleStep=1;
     save();
     return false;
   }
