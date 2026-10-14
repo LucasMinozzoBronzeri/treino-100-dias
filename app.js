@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.7.6';
+const APP_VERSION = '7.7.7';
 const PUSH_API_PATH = '/api/push-subscription';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
@@ -3497,7 +3497,7 @@ function exerciseGoalNameKey(e={}){
 }
 function currentExerciseGoal(p=profile(), e={}){
   const goals=p?.exerciseGoals || {};
-  return goals[exerciseGoalKey(e)] || goals[exerciseGoalNameKey(e)] || null;
+  return (e.variantId ? goals[variantHistoryGoalKey(e)] || null : null) || goals[exerciseGoalKey(e)] || goals[exerciseGoalNameKey(e)] || null;
 }
 function parseTargetSetsReps(target=''){
   const raw=String(target||'').toLowerCase();
@@ -3636,15 +3636,16 @@ function goalForExerciseFromRecord(e={}, record={}){
 }
 function saveExerciseGoal(p,e,goal){
   if(!p.exerciseGoals) p.exerciseGoals={};
-  p.exerciseGoals[exerciseGoalKey(e)] = goal;
-  p.exerciseGoals[exerciseGoalNameKey(e)] = goal;
+  p.exerciseGoals[variantHistoryGoalKey(e)] = goal;
+  if(!e.variantId) p.exerciseGoals[exerciseGoalNameKey(e)] = goal;
 }
 function updateExerciseGoalsFromWorkout(p,w,record,dayExercises=[]){
   (dayExercises||[]).forEach(e=>{
     const kind=exerciseKind(e);
     if(kind==='mobility') return;
-    const goal=goalForExerciseFromRecord(e,record);
-    saveExerciseGoal(p,e,goal);
+    const actual=effectiveExercise({exerciseMeta:record.meta||{},exerciseSelections:p.exerciseSelections||{}},e);
+    const goal=actual.measurement==='duration' ? durationGoalFromRecord(actual,record) : goalForExerciseFromRecord(actual,record);
+    saveExerciseGoal(p,actual,goal);
   });
 }
 function applyAiExerciseGoalsFromReport(p,h,w){
@@ -3721,8 +3722,57 @@ function openSubstitutionModal(exId){
   if(rem) rem.onclick=()=>{ if(p.tempSubstitutions) delete p.tempSubstitutions[exId]; save(); openWorkout(w.id); toast('Exercício original restaurado.'); };
 }
 
+// v7.7.7: exercise variants are structured by AI, or detected locally in legacy plans.
+function variantMeasurement(name='', type=''){
+  const n=normalizedExerciseName(name+' '+type);
+  if(/prancha|plank|isometri|wall sit|sustenta/.test(n)) return 'duration';
+  if(/cardio|esteira|bicicleta|corrida|eliptico|escada/.test(n)) return 'cardio';
+  if(/alongamento|mobilidade/.test(n)) return 'mobility';
+  return 'weight_reps';
+}
+function exerciseVariants(e={}){
+  const explicit=Array.isArray(e.variations)?e.variations:[];
+  if(explicit.length>=2){
+    const variants=explicit.slice(0,5).filter(x=>x && typeof x.name==='string' && x.name.trim()).map((x,i)=>({id:String(x.id||'option_'+i).replace(/[^\w-]/g,'_').slice(0,55),name:x.name.trim().slice(0,90),measurement:['duration','cardio','mobility','weight_reps'].includes(x.measurement)?x.measurement:variantMeasurement(x.name,e.type)}));
+    if(variants.length>=2 && new Set(variants.map(x=>x.id)).size===variants.length) return variants;
+  }
+  const name=String(e.name||'').trim();
+  // Legacy fallback: the conjunction must be between two exercise alternatives, not rep ranges.
+  if(!/\s+ou\s+/i.test(name) || /\b\d+\s+ou\s+\d+\b/i.test(name)) return [];
+  const parts=name.split(/\s+ou\s+/i).map(x=>x.trim()).filter(Boolean);
+  if(parts.length!==2 || parts.some(x=>x.length<3)) return [];
+  const [a,b]=parts;
+  let second=b;
+  // E.g. "Rosca Scott máquina ou cabo" => "Rosca Scott cabo"
+  if(/^(cabo|maquina|máquina|halteres?|barra(?: w| reta)?|polia)$/i.test(b)){
+    second=a.replace(/\s+(m[aá]quina|cabo|halteres?|barra(?: w| reta)?|polia)$/i,'').trim()+' '+b;
+  }
+  return [a,second].map((n,i)=>({id:'option_'+i,name:n,measurement:variantMeasurement(n,e.type)}));
+}
+function chosenVariant(p,e){
+  const variants=exerciseVariants(e);
+  if(!variants.length) return null;
+  const saved=p.exerciseMeta?.[e.id]?.selectedVariationId || p.exerciseSelections?.[e.id];
+  return variants.find(x=>x.id===saved) || variants[0];
+}
+function effectiveExercise(p,e){
+  const v=chosenVariant(p,e);
+  return v?{...e,name:v.name,type:v.measurement,variantId:v.id,variantName:v.name,measurement:v.measurement}:e;
+}
+function variantHistoryGoalKey(e){return e.variantId ? exerciseGoalKey(e)+':variant:'+e.variantId : exerciseGoalKey(e);}
+function durationGoalFromRecord(e,record){
+  const m=record.meta?.[e.id]||{};
+  const seconds=Number(m.durationSeconds||0), sets=Number(m.durationSets||0);
+  const pain=String(m.pain||'').toLowerCase();
+  let suggestion='Registre o tempo e as séries para acompanhar sua evolução.';
+  if(seconds>0 && sets>0){
+    suggestion=/m[eé]dia|forte/.test(pain) ? `Mantenha ou reduza ${seconds}s por série e priorize a postura.` : /muito pesada/i.test(m.difficulty||'') ? `Tente manter ${sets} séries de ${seconds}s com boa execução.` : `Tente manter ${sets} séries de ${seconds}s; se estiver confortável, aumente 5s gradualmente.`;
+  }
+  return {exerciseId:e.id,exerciseName:e.name,variantId:e.variantId,source:'auto',suggestion,reason:'Tempo de prancha avaliado separadamente de carga e repetições.',createdAt:nowISO(),validFor:'next_workout'};
+}
 function exerciseKind(e){
   if(exerciseIsCardio(e)) return 'cardio';
+  if(variantMeasurement(e.name,e.type)==='duration') return 'duration';
   const s=String((e?.type||'')+' '+(e?.name||'')).toLowerCase();
   if(/prancha|abdominal|core/.test(s)) return 'core';
   if(/along|mobilidade|aquecimento/.test(s)) return 'mobility';
@@ -3736,11 +3786,16 @@ function exerciseHTML(p,w,e,isCurrent){
   const statusTime = t.completedAt ? `Concluído às ${fmtTime(t.completedAt)}` : t.skippedAt ? `Pulado às ${fmtTime(t.skippedAt)}` : '';
   const adj=currentAdjustment(p);
   const isQuickPriority=!!(adj?.focusExerciseIds||[]).includes(e.id);
-  const weight=p.weights[e.id] || '';
+  const selectedWeightKey=e.id+':'+(p.exerciseMeta?.[e.id]?.selectedVariationId||'');
+  const weight=(exerciseVariants(e).length ? p.variationWeights?.[selectedWeightKey] : p.weights[e.id]) || '';
   const lastLoad=latestExerciseLoad(p,e);
   const sub=tempSubstitutionFor(p,e);
   const locked=!isCurrent;
-  const kind=exerciseKind(e);
+  const selected=chosenVariant(p,e);
+  const actual=effectiveExercise(p,e);
+  const options=exerciseVariants(e);
+  const kind=selected ? (selected.measurement==='duration'?'duration':selected.measurement==='weight_reps'?'strength':selected.measurement) : exerciseKind(e);
+  const variationPicker=options.length?`<div class="field full-field"><label>Qual exercício você fez?</label><div class="segmented compact-segmented">${options.map(v=>`<button type="button" class="seg-btn ${selected?.id===v.id?'active':''}" data-ex-variation="${esc(v.id)}" data-ex-id="${esc(e.id)}">${esc(v.name)}</button>`).join('')}</div></div>`:'';
   const commonTail = `
       <div class="field"><label>Dificuldade</label><select class="select" data-meta="difficulty" data-ex-id="${e.id}">
         ${['','Fácil','Boa','Pesada','Muito pesada'].map(x=>`<option ${m.difficulty===x?'selected':''}>${x}</option>`).join('')}
@@ -3749,7 +3804,7 @@ function exerciseHTML(p,w,e,isCurrent){
         ${['','Não','Leve','Média','Forte'].map(x=>`<option ${m.pain===x?'selected':''}>${x}</option>`).join('')}
       </select></div>
       <div class="field full-field"><label>Observação</label><input class="input" data-meta="note" data-ex-id="${e.id}" value="${esc(m.note||'')}" placeholder="ex: cansei muito, dor no pé, ajustar ritmo..."></div>`;
-  const goal=currentExerciseGoal(p,e);
+  const goal=currentExerciseGoal(p,actual);
   const strengthFields = `
       <div class="field"><label>Carga usada</label><input class="input" data-weight="${e.id}" value="${esc(weight)}" placeholder="ex: 40 kg"></div>
       ${repsInputsHTML(e,m)}
@@ -3767,15 +3822,19 @@ function exerciseHTML(p,w,e,isCurrent){
       <div class="field"><label>Tempo/reps feitos</label><input class="input" data-meta="coreDone" data-ex-id="${e.id}" value="${esc(m.coreDone||'')}" placeholder="ex: 3x30s ou 3x15"></div>
       <div class="field"><label>Próxima meta</label><input class="input" data-meta="coreTarget" data-ex-id="${e.id}" value="${esc(m.coreTarget||e.target||'')}" placeholder="ex: 3x40s"></div>
       ${commonTail}`;
+  const durationFields = `
+      <div class="field"><label>Tempo por série (segundos)</label><input class="input" type="number" min="1" max="3600" inputmode="numeric" data-meta="durationSeconds" data-ex-id="${e.id}" value="${esc(m.durationSeconds||'')}" placeholder="ex: 70"></div>
+      <div class="field"><label>Quantidade de séries</label><input class="input" type="number" min="1" max="20" inputmode="numeric" data-meta="durationSets" data-ex-id="${e.id}" value="${esc(m.durationSets||'')}" placeholder="ex: 3"></div>
+      ${commonTail}`;
   const mobilityFields = `
       <div class="field"><label>Tempo feito</label><input class="input" data-meta="mobilityTime" data-ex-id="${e.id}" value="${esc(m.mobilityTime||'')}" placeholder="ex: 8 min"></div>
       <div class="field"><label>Região</label><input class="input" data-meta="mobilityArea" data-ex-id="${e.id}" value="${esc(m.mobilityArea||'')}" placeholder="ex: ombro, quadril..."></div>
       ${commonTail}`;
-  const fields = kind==='cardio' ? cardioFields : kind==='core' ? coreFields : kind==='mobility' ? mobilityFields : strengthFields;
-  const kindLabel = kind==='cardio' ? 'cardio' : kind==='core' ? 'core' : kind==='mobility' ? 'mobilidade' : (e.type||'força');
+  const fields = variationPicker + (kind==='duration' ? durationFields : kind==='cardio' ? cardioFields : kind==='core' ? coreFields : kind==='mobility' ? mobilityFields : strengthFields);
+  const kindLabel = kind==='duration' ? 'isometria' : kind==='cardio' ? 'cardio' : kind==='core' ? 'core' : kind==='mobility' ? 'mobilidade' : (e.type||'força');
   return `<div class="exercise ${done?'done':''} ${status==='skipped'?'skipped':''} ${isQuickPriority?'quick-priority-ex':''}" data-exercise-card="${e.id}">
     <div class="exercise-top">
-      <div><h4>${esc(e.name)}</h4><div class="small">${esc(kindLabel)} • meta ${esc(e.target||'4x12')}${statusTime ? ' • '+esc(statusTime) : ''}</div>${lastLoad?`<div class="last-load">Última carga: <b>${esc(lastLoad.weight)}</b> • ${lastLoad.reps?`reps ${esc(lastLoad.reps)} • `:''}${esc(fmtDate(lastLoad.date))}</div>`:''}${goal?`<div class="suggested-goal">🎯 Meta sugerida: <b>${esc(goal.suggestion||'')}</b>${goal.source==='ia'?' <span>IA</span>':''}</div>`:''}${e.temporarySubstitution?`<div class="last-load orange">Hoje no lugar de: <b>${esc(e.originalName||'exercício original')}</b></div>`:''}</div>
+      <div><h4>${esc(e.name)}</h4><div class="small">${esc(kindLabel)} • ${selected?'selecionado: '+esc(selected.name)+' • ':''}meta ${esc(e.target||'4x12')}${statusTime ? ' • '+esc(statusTime) : ''}</div>${!selected && lastLoad?`<div class="last-load">Última carga: <b>${esc(lastLoad.weight)}</b> • ${lastLoad.reps?`reps ${esc(lastLoad.reps)} • `:''}${esc(fmtDate(lastLoad.date))}</div>`:''}${goal?`<div class="suggested-goal">🎯 Meta sugerida: <b>${esc(goal.suggestion||'')}</b>${goal.source==='ia'?' <span>IA</span>':''}</div>`:''}${e.temporarySubstitution?`<div class="last-load orange">Hoje no lugar de: <b>${esc(e.originalName||'exercício original')}</b></div>`:''}</div>
       <span class="badge ${done?'green':status==='skipped'?'yellow':isQuickPriority?'orange':''}">${done?'Concluído':status==='skipped'?'Pulado':isQuickPriority?'Prioridade':isCurrent?'Pendente':'Consulta'}</span>
     </div>
     <div class="exercise-controls ${kind==='cardio'?'cardio-controls':''}">
@@ -3811,13 +3870,14 @@ function openWorkout(id){
 }
 function wireWorkoutModal(){
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
-  document.querySelectorAll('[data-weight]').forEach(inp=>inp.oninput=()=>{ const p=profile(); p.weights[inp.dataset.weight]=inp.value; save(); });
+  document.querySelectorAll('[data-weight]').forEach(inp=>inp.oninput=()=>{ const p=profile(); p.weights[inp.dataset.weight]=inp.value; const e=(workoutById(p,activeModalWorkout)?.exercises||[]).find(x=>x.id===inp.dataset.weight); if(e && exerciseVariants(e).length){if(!p.variationWeights)p.variationWeights={}; p.variationWeights[e.id+':'+(p.exerciseMeta[e.id]?.selectedVariationId||exerciseVariants(e)[0].id)]=inp.value;} save(); });
   document.querySelectorAll('[data-rep-ex]').forEach(inp=>{
     inp.onfocus=()=>setTimeout(()=>{ try{ inp.select(); }catch(e){} },0);
     inp.onmouseup=(ev)=>{ ev.preventDefault(); };
     inp.oninput=()=>{ normalizeRepsInputsForExercise(inp.dataset.repEx); save(); };
   });
   document.querySelectorAll('[data-meta]').forEach(inp=>inp.oninput=inp.onchange=()=>{ const p=profile(); const id=inp.dataset.exId; if(!p.exerciseMeta[id]) p.exerciseMeta[id]={}; p.exerciseMeta[id][inp.dataset.meta]=inp.value; save(); });
+  document.querySelectorAll('[data-ex-variation]').forEach(btn=>btn.onclick=()=>{ const p=profile(); const id=btn.dataset.exId; if(!p.exerciseMeta[id])p.exerciseMeta[id]={}; p.exerciseMeta[id].selectedVariationId=btn.dataset.exVariation; const key=id+':'+btn.dataset.exVariation; p.weights[id]=p.variationWeights?.[key]||''; save(); refreshWorkoutKeepingScroll(); });
   document.querySelectorAll('[data-cardio-type]').forEach(btn=>btn.onclick=()=>{ const p=profile(); const id=btn.dataset.exId; if(!p.exerciseMeta[id]) p.exerciseMeta[id]={}; p.exerciseMeta[id].cardioType=btn.dataset.cardioType; save(); refreshWorkoutKeepingScroll(); });
   document.querySelectorAll('[data-toggle-ex]').forEach(b=>b.onclick=()=>toggleDone(b.dataset.toggleEx));
   document.querySelectorAll('[data-skip-ex]').forEach(b=>b.onclick=()=>skipExercise(b.dataset.skipEx));
@@ -3894,11 +3954,15 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
   if(!confirm(`Finalizar o treino ${id}?\n\nConcluídos: ${doneCount}\nPulados: ${skippedCount}`)) return;
   const weights={}, status={}, metaSnap={}, substitutions=[];
   dayExercises.forEach(e=>{
-    if(p.weights[e.id]) weights[e.id]=p.weights[e.id];
+    const performed=effectiveExercise(p,e);
+    const capturedWeight=performed.variantId?p.variationWeights?.[e.id+':'+performed.variantId]:p.weights[e.id];
+    if(performed.measurement!=='duration' && capturedWeight) weights[e.id]=capturedWeight;
     if(p.tempStatus[e.id]) status[e.id]=p.tempStatus[e.id];
     const metaObj={...(p.exerciseMeta[e.id]||{}), ...(p.tempTimes?.[e.id]||{})};
     if(Array.isArray(metaObj.repsPerSet)){ metaObj.reps = metaObj.repsPerSet.join('/'); metaObj.sets = metaObj.repsPerSet.length; metaObj.repsDoneAvg = metaObj.repsPerSet.length ? Math.round(metaObj.repsPerSet.reduce((a,b)=>Number(a)+Number(b),0)/metaObj.repsPerSet.length) : ''; }
-    metaObj.exerciseName=e.name;
+    metaObj.exerciseName=performed.name; metaObj.originalExerciseName=e.name;
+    metaObj.measurement=performed.measurement||variantMeasurement(performed.name,performed.type);
+    if(performed.variantId){metaObj.selectedVariationId=performed.variantId;metaObj.variantName=performed.name;}
     if(e.temporarySubstitution){ metaObj.originalExerciseName=e.originalName||''; metaObj.substituteReason=e.substituteReason||'Máquina ocupada'; substitutions.push({exerciseId:e.id, originalName:e.originalName||'', substituteName:e.name, reason:e.substituteReason||'Máquina ocupada', createdAt:nowISO()}); }
     if(Object.keys(metaObj).length) metaSnap[e.id]=metaObj;
   });
@@ -4027,7 +4091,9 @@ function buildWorkoutAIPayload(p, h){
   const w=workoutById(p,h.workoutId);
   const exerciseDetails=(w?.exercises||[]).map(e=>({
     id:e.id,
-    name:e.name,
+    name:h.meta?.[e.id]?.variantName || e.name,
+    originalName:e.name,
+    measurement:h.meta?.[e.id]?.measurement || variantMeasurement(e.name,e.type),
     type:e.type,
     target:e.target,
     status:h.status?.[e.id] || 'not_done',
@@ -4035,6 +4101,8 @@ function buildWorkoutAIPayload(p, h){
     completedAt:h.meta?.[e.id]?.completedAt || null,
     skippedAt:h.meta?.[e.id]?.skippedAt || null,
     repsPerSet:h.meta?.[e.id]?.repsPerSet || [],
+    durationSeconds:h.meta?.[e.id]?.durationSeconds || null,
+    durationSets:h.meta?.[e.id]?.durationSets || null,
     suggestedGoal:currentExerciseGoal(p,e),
     meta:h.meta?.[e.id] || {}
   }));
@@ -4628,7 +4696,8 @@ function normalizeAIPlan(plan, mode='initial'){
         id: `${id.toLowerCase()}_ai_${Date.now()}_${n}`,
         name: String(item?.name || item?.exercise || `Exercício ${n+1}`),
         type: String(item?.type || item?.equipment || 'personalizado'),
-        target: String(item?.target || item?.setsReps || item?.reps || '3x10-12')
+        target: String(item?.target || item?.setsReps || item?.reps || '3x10-12'),
+        variations: Array.isArray(item?.variations) ? item.variations.slice(0,5).map((v,i)=>({id:String(v?.id||'option_'+i),name:String(v?.name||''),measurement:String(v?.measurement||'weight_reps')})).filter(v=>v.name) : []
       })).filter(e=>e.name.trim())
     };
   });
