@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.7.4';
+const APP_VERSION = '7.7.5';
 const PUSH_API_PATH = '/api/push-subscription';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
@@ -2398,7 +2398,23 @@ async function completeVerifiedAccountSession(){
   state.entryMode = 'account';
   save();
 
-  try{ await upsertCloudProfile(accountProfile.name || user.user_metadata?.display_name || 'Usuário', signupInfo); }catch(e){ console.warn('profile upsert failed', e); }
+  // v7.7.5: Existing accounts must be READ before any write. The prior
+  // unconditional upsert on EVERY app launch pushed stale local reminders over
+  // newer values in Supabase (e.g. 22:00 reverted to 21:00).
+  // Only initialize a missing database row; never overwrite an existing row.
+  if(!cloudInfo){
+    try{ await upsertCloudProfile(accountProfile.name || user.user_metadata?.display_name || 'Usuário', signupInfo); }
+    catch(e){ console.warn('initial profile upsert failed', e); }
+  }else if(!reminderWritesPending.has(accountProfile.id)){
+    if(cloudInfo.reminders && typeof cloudInfo.reminders==='object'){
+      accountProfile.reminders=structuredClone(cloudInfo.reminders);
+    }
+    if(cloudInfo.routine && typeof cloudInfo.routine==='object'){
+      accountProfile.routine={...(accountProfile.routine||{}), ...cloudInfo.routine};
+    }
+    ensureProfile(accountProfile);
+    save();
+  }
   try{ await loadLatestPlanFromCloud(); }catch(e){ console.warn('plan load failed', e); }
   try{ await loadLatestDietPlanFromCloud(); }catch(e){ console.warn('diet load failed', e); }
   try{ await loadLessonsFromCloud({silent:true}); }catch(e){ console.warn('lessons load failed', e); }
@@ -3401,12 +3417,21 @@ function saveProfileForm(doRender=true){
   const cloudIsConnected=hasCloudAccount();
   if(cloudIsConnected){
     reminderWritesPending.add(profileId);
-    upsertCloudProfile(null).then(()=>{
+    // Capture values at click time. A later asynchronous profile read must not
+    // change what gets written to Supabase.
+    const snapshot={
+      reminders:structuredClone(p.reminders),
+      routine:structuredClone(p.routine),
+      name:p.name, sex:p.sex, age:p.age, height:p.height,
+      weight:p.weight, goal:p.goal, focus:p.focus, notes:p.notes,
+      experience:p.experience, daysPerWeek:p.daysPerWeek
+    };
+    saveRoutineSnapshotToCloud(profileId, snapshot).then(()=>{
       reminderWritesPending.delete(profileId);
       if(doRender) toast('Perfil salvo e sincronizado com o Supabase.');
     }).catch(e=>{
-      // Leave a pending flag: a stale read must not erase unsynced local changes.
-      console.error('Falha ao salvar o perfil na nuvem:',e);
+      // Keep local edits and prevent old cloud reads from replacing them.
+      console.error('Falha ao salvar a rotina na nuvem:',e);
       toast('Salvo neste aparelho, mas NÃO sincronizado. Verifique a conexão e tente salvar novamente.');
     });
   }
@@ -4258,6 +4283,28 @@ async function cloudLogout(){
   await removeOnlySelectedProfile(id);
   toast('Somente a conta selecionada saiu deste aparelho.');
 }
+// v7.7.5: targeted write. Never let non-reminder cloud sync rewrite the routine.
+async function saveRoutineSnapshotToCloud(profileId, snapshot){
+  const selected=state.profiles.find(x=>x.id===profileId);
+  if(!selected?.cloudUserId || state.activeProfileId!==profileId) throw Error('Perfil alterado durante a sincronização.');
+  const user=await getCurrentCloudUser();
+  if(!user || user.id!==selected.cloudUserId) throw Error('Sessão diferente do perfil selecionado.');
+  if(isOffline()) throw Error('Sem internet.');
+  // Preserve classes stored inside routine while updating schedule preferences.
+  const {data:cloud,error:readError}=await supabaseClient.from('profiles').select('routine').eq('id',user.id).single();
+  if(readError) throw readError;
+  if(state.activeProfileId!==profileId) throw Error('Perfil mudou antes da gravação.');
+  const routine={...(cloud?.routine||{}),...snapshot.routine};
+  // No blanket upsert of an entire possibly-stale profile.
+  const {data, error}=await supabaseClient.from('profiles')
+    .update({reminders:snapshot.reminders,routine})
+    .eq('id',user.id).select('reminders,routine').single();
+  if(error) throw error;
+  if(!data || JSON.stringify(data.reminders?.water)!==JSON.stringify(snapshot.reminders?.water))
+    throw Error('O servidor não confirmou os horários enviados.');
+  return data;
+}
+
 async function upsertCloudProfile(name=null, sourceInfo=null){
   const user=await getCurrentCloudUser();
   if(!user || isAnonymousCloudUser()) return;
@@ -4294,8 +4341,8 @@ async function upsertCloudProfile(name=null, sourceInfo=null){
     days_per_week:numOrExisting(p.daysPerWeek || info.daysPerWeek || user.user_metadata?.daysPerWeek || user.user_metadata?.days_per_week, existing?.days_per_week, 5),
     accepted_terms_at:p.acceptedTermsAt || existing?.accepted_terms_at || user.user_metadata?.accepted_terms_at || nowISO(),
     accepted_privacy_at:p.acceptedPrivacyAt || existing?.accepted_privacy_at || user.user_metadata?.accepted_privacy_at || nowISO(),
-    routine:{...(p.routine || info.routine || existing?.routine || {}), lessons:p.lessons||[], lessonLogs:p.lessonLogs||[]},
-    reminders:p.reminders || info.reminders || existing?.reminders || {}
+    routine:{...(existing?.routine || p.routine || info.routine || {}), lessons:p.lessons||[], lessonLogs:p.lessonLogs||[]},
+    reminders:existing?.reminders || p.reminders || info.reminders || {}
   };
   const { error } = await supabaseClient.from('profiles').upsert(row, { onConflict:'id' });
   if(error) throw error;
