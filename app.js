@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.7.1';
+const APP_VERSION = '7.7.2';
 const PUSH_API_PATH = '/api/push-subscription';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
@@ -1656,9 +1656,47 @@ function init(){
   byId('openLevelModal')?.addEventListener('click', openLevelModal);
   render();
 }
+// v7.7.2: refresh the selected account's saved reminder settings before
+// displaying the profile. Never borrow the currently authenticated session
+// from a different local profile (multi-account safety).
+async function refreshProfileRemindersForDisplay(selectedProfileId){
+  const selected=state.profiles.find(p=>p.id===selectedProfileId);
+  if(!selected?.cloudUserId || !supabaseClient || isOffline()) return;
+  try{
+    const user=await getCurrentCloudUser();
+    if(!user || user.id!==selected.cloudUserId) return;
+    const {data,error}=await supabaseClient.from('profiles')
+      .select('reminders,routine').eq('id',user.id).maybeSingle();
+    if(error) throw error;
+    if(!data || state.activeProfileId!==selectedProfileId || screen!=='profile') return;
+    // Keep local and cloud values isolated to this profile. In particular,
+    // 00:00 is a valid time, not a missing value or default.
+    const current=state.profiles.find(p=>p.id===selectedProfileId);
+    if(!current || current.cloudUserId!==user.id) return;
+    if(data.reminders && typeof data.reminders==='object'){
+      current.reminders={...(current.reminders||{}),...data.reminders,
+        types:{...(current.reminders?.types||{}),...(data.reminders.types||{})},
+        times:{...(current.reminders?.times||{}),...(data.reminders.times||{})},
+        water:{...(current.reminders?.water||{}),...(data.reminders.water||{})}};
+    }
+    if(data.routine && typeof data.routine==='object'){
+      current.routine={...(current.routine||{}),...data.routine};
+    }
+    ensureProfile(current);
+    save();
+    // Avoid replacing any fields the user has already started editing.
+    const focused=document.activeElement;
+    const dirty=focused && focused.closest?.('.routine-panel') &&
+      ['INPUT','SELECT','TEXTAREA'].includes(focused.tagName);
+    if(!dirty) render();
+  }catch(e){ console.warn('Não foi possível atualizar lembretes da nuvem:',e); }
+}
 function setScreen(s, opts={}){
   screen=s;
   render();
+  if(s==='profile' && state.activeProfileId) {
+    refreshProfileRemindersForDisplay(state.activeProfileId);
+  }
   if(opts.scrollTo){
     requestAnimationFrame(()=>scrollToSection(opts.scrollTo));
   }
