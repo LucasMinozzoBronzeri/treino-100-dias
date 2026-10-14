@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.7.0';
+const APP_VERSION = '7.7.1';
 const PUSH_API_PATH = '/api/push-subscription';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
@@ -1482,29 +1482,89 @@ function maybeShowRankUpModal(xpInfo){
 function normalizeSupabaseUrl(url){
   return String(url||'').replace(/\/rest\/v1\/?$/,'').replace(/\/+$/,'');
 }
+// Each account keeps its own Supabase Auth storage key. Never reuse the same
+// auth client for two different user identities.
+let activeAuthStorageKey = null;
+const AUTH_KEY_PREFIX = 'gym-bronze-account-v770-';
+const PENDING_AUTH_KEY='gym-bronze-pending-auth-v770';
+function newAuthKey(){ return AUTH_KEY_PREFIX + crypto.randomUUID(); }
+function makeAuthClient(storageKey){
+  const client=window.supabase.createClient(normalizeSupabaseUrl(SUPABASE_URL), SUPABASE_ANON_KEY,
+    {auth:{storageKey, persistSession:true, autoRefreshToken:true, detectSessionInUrl:true}});
+  client.auth.onAuthStateChange((_event,session)=>{
+    if(client!==supabaseClient) return;
+    cloudUser=session?.user||null;
+    // Never attach an arbitrary auth event to a different displayed profile.
+    if(cloudUser && state.activeProfileId && profile()?.cloudUserId && profile().cloudUserId!==cloudUser.id) return;
+    render();
+  });
+  return client;
+}
+function setAuthClient(key){
+  activeAuthStorageKey=key;
+  supabaseClient=makeAuthClient(key);
+  cloudUser=null;
+}
+async function prepareNewAccountLogin(){
+  const key=newAuthKey();
+  localStorage.setItem(PENDING_AUTH_KEY,key);
+  setAuthClient(key);
+  cloudReady=true;
+}
+function attachAuthenticatedProfile(){
+  if(!cloudUser?.id || !activeAuthStorageKey) return;
+  const p=findLocalProfileForCloudUser(cloudUser);
+  if(p){p.authStorageKey=activeAuthStorageKey;save();localStorage.removeItem(PENDING_AUTH_KEY);}
+}
+async function activateDeviceProfile(id){
+  const selected=state.profiles.find(p=>p.id===id);
+  if(!selected) return false;
+  state.activeProfileId=id;
+  state.onboardingDone=true;
+  screen='home';
+  if(selected.cloudUserId){
+    state.entryMode='account';
+    if(!selected.authStorageKey){
+      // Legacy session migration: first account from the old single-session version.
+      const legacy=window.supabase.createClient(normalizeSupabaseUrl(SUPABASE_URL),SUPABASE_ANON_KEY);
+      const {data}=await legacy.auth.getSession();
+      if(data?.session?.user?.id===selected.cloudUserId){
+        const key=newAuthKey();
+        setAuthClient(key);
+        await supabaseClient.auth.setSession({access_token:data.session.access_token,refresh_token:data.session.refresh_token});
+        selected.authStorageKey=key;
+      }
+    }else{
+      setAuthClient(selected.authStorageKey);
+    }
+    const {data}=await supabaseClient.auth.getUser().catch(()=>({data:null}));
+    cloudUser=data?.user?.id===selected.cloudUserId?data.user:null;
+  }else{
+    state.entryMode='local';
+    setAuthClient(newAuthKey());
+  }
+  save();render();
+  if(selected.cloudUserId&&!cloudUser) toast('Sessão desta conta expirada. Entre novamente nesta conta.');
+  return true;
+}
 function setupSupabase(){
   try{
     if(window.supabase && SUPABASE_URL && SUPABASE_ANON_KEY){
-      supabaseClient = window.supabase.createClient(normalizeSupabaseUrl(SUPABASE_URL), SUPABASE_ANON_KEY);
-      cloudReady = true;
-      refreshCloudUser(false);
-      supabaseClient.auth.onAuthStateChange(async (_event, session)=>{
-        cloudUser = session?.user || null;
-        if(cloudUser && !isAnonymousCloudUser()){
-          const wasPending = !!state.pendingEmailVerification || !state.onboardingDone || state.entryMode !== 'account';
-          const ok = await completeVerifiedAccountSession();
-          if(ok && wasPending){
-            screen = 'home';
-            toast('E-mail confirmado. Sua conta está ativa.');
-          }
-        }
-        render();
-      });
+      cloudReady=true;
+      const pendingKey=localStorage.getItem(PENDING_AUTH_KEY);
+      if(pendingKey && (!state.activeProfileId || !state.onboardingDone)){
+        setAuthClient(pendingKey);
+        return;
+      }
+      const selected=profile();
+      if(selected?.cloudUserId){
+        // Existing account sessions are restored independently on app launch.
+        activateDeviceProfile(selected.id).catch(e=>console.warn('Restaurar sessão:',e));
+      }else{
+        setAuthClient(newAuthKey());
+      }
     }
-  }catch(e){
-    console.warn('Supabase indisponível:', e);
-    cloudReady = false;
-  }
+  }catch(e){console.warn('Supabase indisponível:',e);cloudReady=false;}
 }
 async function refreshCloudUser(shouldRender=true){
   if(!supabaseClient) return null;
@@ -1516,12 +1576,14 @@ async function refreshCloudUser(shouldRender=true){
   return cloudUser;
 }
 async function getCurrentCloudUser(){
-  if(cloudUser) return cloudUser;
-  return await refreshCloudUser(false);
+  const p=state.activeProfileId ? profile() : null;
+  if(cloudUser && (!p?.cloudUserId || cloudUser.id===p.cloudUserId)) return cloudUser;
+  const user=await refreshCloudUser(false);
+  return p?.cloudUserId && user?.id!==p.cloudUserId ? null : user;
 }
 function isLocalMode(){ return state.entryMode === 'local'; }
-function isAnonymousCloudUser(){ return !!(cloudUser?.is_anonymous || cloudUser?.app_metadata?.provider === 'anonymous' || isLocalMode()); }
-function hasCloudAccount(){ const p=profile(); return !!(cloudUser && !isAnonymousCloudUser() && state.entryMode === 'account' && (!p.cloudUserId || p.cloudUserId === cloudUser.id)); }
+function isAnonymousCloudUser(){ return !!(cloudUser?.is_anonymous || cloudUser?.app_metadata?.provider === 'anonymous'); }
+function hasCloudAccount(){ const p=profile(); return !!(cloudUser?.id && !isAnonymousCloudUser() && state.entryMode==='account' && p?.cloudUserId===cloudUser.id); }
 function cloudStatusHTML(){
   if(!cloudReady) return '<span class="badge red">indisponível</span>';
   if(hasCloudAccount()) return '<span class="badge green">conectado</span>';
@@ -1556,13 +1618,14 @@ function onlineNoticeHTML(){
 async function getCloudAccessToken(){
   if(!supabaseClient) return '';
   const { data } = await supabaseClient.auth.getSession();
+  if(data?.session?.user?.id!==profile()?.cloudUserId) return '';
   return data?.session?.access_token || '';
 }
 async function ensureAccountSession(email='', password=''){
   if(!supabaseClient) return { ok:false, reason:'Supabase indisponível.' };
   const { data: current } = await supabaseClient.auth.getSession();
-  if(current?.session?.access_token){
-    cloudUser = current.session.user || cloudUser;
+  if(current?.session?.access_token && current.session.user?.id===profile()?.cloudUserId){
+    cloudUser = current.session.user;
     return { ok:true, session: current.session };
   }
   if(email && password){
@@ -2084,6 +2147,7 @@ async function onboardingGoogleLogin(){
   if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
   if(isOffline()) return toast('Você está offline. Entre com Google quando estiver online.');
   const redirectTo = window.location.origin + window.location.pathname;
+  await prepareNewAccountLogin();
   const { error } = await supabaseClient.auth.signInWithOAuth({
     provider:'google',
     options:{ redirectTo, queryParams:{ prompt:'select_account' } }
@@ -2168,6 +2232,52 @@ function findLocalProfileForCloudUser(user){
   if(!user) return null;
   return state.profiles.find(p=>p.cloudUserId===user.id || (p.accountEmail && user.email && String(p.accountEmail).toLowerCase()===String(user.email).toLowerCase())) || null;
 }
+// v7.7.1: promote the EXISTING local profile; never create a replacement or
+// download an empty cloud plan over it during first account creation.
+function localProfileAwaitingUpgrade(user){
+  if(!user?.id || !user.email) return null;
+  const email=String(user.email).trim().toLowerCase();
+  return state.profiles.find(p=>!p.cloudUserId && p.pendingUpgradeEmail &&
+    String(p.pendingUpgradeEmail).trim().toLowerCase()===email &&
+    (!p.pendingUpgradeUserId || p.pendingUpgradeUserId===user.id)) || null;
+}
+async function finishLocalAccountUpgrade(user){
+  const local=localProfileAwaitingUpgrade(user);
+  if(!local) return false;
+  const selected=profile();
+  if(selected?.cloudUserId && selected.cloudUserId!==user.id) throw Error('Outra conta está ativa. Selecione o perfil local para concluir.');
+  state.activeProfileId=local.id;
+  local.cloudUserId=user.id;
+  local.accountEmail=user.email;
+  local.authStorageKey=activeAuthStorageKey;
+  state.entryMode='account';
+  state.onboardingDone=true;
+  cloudUser=user;
+  // First protect and persist all existing local data, BEFORE any cloud load.
+  save();
+  try{
+    await upsertCloudProfile(local.name);
+    const result=await syncLocalHistoryToCloud({silent:true});
+    if(!result.ok) throw Error('Não foi possível enviar todo o histórico de treinos.');
+    await saveCurrentPlanToCloud('local_account_upgrade');
+    if(local.dietPlan) await saveDietPlanToCloud(local.dietPlan,{silent:true});
+    await syncXpEventsToCloud({silent:true});
+    await syncLessonsToCloud({silent:true});
+    delete local.pendingUpgradeEmail;
+    delete local.pendingUpgradeUserId;
+    local.localUpgradeSyncPending=false;
+    state.pendingEmailVerification=null;
+    attachAuthenticatedProfile();
+    save();
+    return true;
+  }catch(e){
+    local.localUpgradeSyncPending=true;
+    save();
+    console.error('Falha na migração do perfil local:',e);
+    toast('Conta vinculada, mas a sincronização ficou pendente. Seus dados continuam neste aparelho. Não apague o perfil.');
+    return true; // Prevent cloud downloads from overwriting local data.
+  }
+}
 function prepareAccountProfile(user, info={}){
   let p=findLocalProfileForCloudUser(user);
   if(!p){
@@ -2193,10 +2303,17 @@ async function completeVerifiedAccountSession(){
     return false;
   }
 
+  // Local-to-cloud upgrade must precede profile creation and cloud downloads.
+  if(await finishLocalAccountUpgrade(user)){
+    state.pendingEmailVerification=null;
+    save();
+    return true;
+  }
   const pending = state.pendingEmailVerification || {};
   const cloudInfo = await fetchCloudProfileInfo(user);
   const signupInfo = pending.profileInfo || cloudInfo || normalizeProfileInfoFromUser(user);
   const accountProfile = prepareAccountProfile(user, signupInfo);
+  attachAuthenticatedProfile();
 
   if(!profileInfoLooksComplete(signupInfo) && !currentProfileLooksComplete(accountProfile)){
     state.pendingProfileCompletion={
@@ -2345,6 +2462,7 @@ async function onboardingLogin(){
   const email=cleanEmailInput(byId('loginEmail')?.value);
   const password=byId('loginPassword')?.value || '';
   if(!isValidEmailInput(email) || !password) return toast('Informe um e-mail válido e a senha.');
+  await prepareNewAccountLogin();
   const { data, error } = await supabaseClient.auth.signInWithPassword({email,password});
   if(error){
     const msg = friendlyAuthError(error);
@@ -2385,7 +2503,8 @@ async function onboardingSignup(){
   if(password !== password2) return showFormError('signupError', 'As senhas não conferem.');
   if(!byId('signupAcceptTerms')?.checked) return showFormError('signupError', 'Aceite os Termos e a Política de Privacidade para continuar.');
 
-  applyProfileInfo(info);
+  // A new registration is never allowed to overwrite an existing device profile.
+  createFreshLocalProfile(info);
   markLegalAcceptance();
   await maybeAskNotificationPermissionForProfile(profile());
   const legalInfo = {
@@ -2394,6 +2513,7 @@ async function onboardingSignup(){
   };
   save();
 
+  await prepareNewAccountLogin();
   const { data, error } = await supabaseClient.auth.signUp({
     email,
     password,
@@ -3057,7 +3177,7 @@ function renderProfile(){
     <section class="card legal-card"><div class="card-title"><div><h3>Termos e avisos</h3><p>Transparência para uso público.</p></div><span class="badge yellow">Beta</span></div><div class="legal-text"><p>O Gym Bronze é uma ferramenta de organização, treino e análise. Ele não substitui personal trainer, nutricionista, médico ou fisioterapeuta.</p><p>As sugestões de treino e alimentação são educativas. Interrompa o exercício em caso de dor forte, tontura, falta de ar incomum ou desconforto relevante.</p><p>Dados como idade, peso, altura, objetivo, observações, treinos e relatórios podem ser enviados para serviços externos de IA quando você usa recursos inteligentes.</p></div></section>
   </details>
 
-  <section class="card danger-zone"><div class="card-title"><div><h3>Zona de segurança</h3><p>Ações de saída, limpeza e exclusão ficam aqui.</p></div></div><div class="actions">${hasCloudAccount()?'<button class="btn secondary danger-soft" data-action="cloud-logout">Sair e limpar este aparelho</button><button class="btn danger" data-action="delete-account">Excluir conta</button>': isLocalMode()?'<button class="btn secondary danger-soft" data-action="local-logout">Sair e apagar perfil local</button>':''}<button class="btn danger" data-action="reset-profile">Resetar perfil ativo</button></div><p class="muted">Sair limpa apenas este aparelho. Excluir conta tenta apagar também os dados da nuvem.</p></section>`;
+  <section class="card danger-zone"><div class="card-title"><div><h3>Zona de segurança</h3><p>Ações de saída, limpeza e exclusão ficam aqui.</p></div></div><div class="actions">${profile()?.cloudUserId?'<button class="btn secondary danger-soft" data-action="cloud-logout">Sair desta conta neste aparelho</button><button class="btn danger" data-action="delete-account">Excluir conta</button>': isLocalMode()?'<button class="btn secondary danger-soft" data-action="local-logout">Sair e apagar perfil local</button>':''}<button class="btn danger" data-action="reset-profile">Resetar perfil ativo</button></div><p class="muted">Sair remove somente o perfil selecionado deste dispositivo. Excluir conta apaga os dados da nuvem apenas após verificar a identidade da conta aberta.</p></section>`;
 }
 
 function renderCloudAccount(p){
@@ -3066,7 +3186,7 @@ function renderCloudAccount(p){
   if(hasCloudAccount()){
     return `<div class="cloud-panel"><p><b>Conta conectada:</b> ${esc(cloudUser.email||'usuário conectado')}</p><p class="muted">Histórico local: ${p.history.length} treino(s) • Na nuvem: ${synced} • Pendentes: ${pending}</p><div class="actions"><button class="btn" data-action="cloud-sync">Sincronizar tudo com a nuvem</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div></div>`;
   }
-  const upgradeForm = `<div class="form-grid"><div class="field" style="grid-column:1/-1"><label>Nome para criar conta</label><input class="input" id="cloudName" value="${esc(p?.name||'')}"></div><div class="field"><label>E-mail</label><input class="input" id="cloudEmail" type="text" inputmode="email" autocomplete="email" placeholder="seu@email.com"></div><div class="field"><label>Senha</label><input class="input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="Maiúscula, número e especial"></div><div class="field"><label>Confirmar senha</label><input class="input" id="cloudPassword2" type="password" autocomplete="new-password" placeholder="repita a senha"></div><label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="cloudAcceptTerms"> <span>Li e aceito os Termos e a Política de Privacidade.</span></label></div><div class="actions"><button class="btn" data-action="cloud-login">Entrar</button><button class="btn secondary" data-action="cloud-signup">Criar conta</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div>`;
+  const upgradeForm = `<div class="form-grid"><div class="field" style="grid-column:1/-1"><label>Nome para criar conta</label><input class="input" id="cloudName" value="${esc(p?.name||'')}"></div><div class="field"><label>E-mail</label><input class="input" id="cloudEmail" type="text" inputmode="email" autocomplete="email" placeholder="seu@email.com"></div><div class="field"><label>Senha</label><input class="input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="Maiúscula, número e especial"></div><div class="field"><label>Confirmar senha</label><input class="input" id="cloudPassword2" type="password" autocomplete="new-password" placeholder="repita a senha"></div><label class="legal-check" style="grid-column:1/-1"><input type="checkbox" id="cloudAcceptTerms"> <span>Li e aceito os Termos e a Política de Privacidade.</span></label></div><div class="actions"><button class="btn" data-action="cloud-login">Entrar</button><button class="btn secondary" data-action="cloud-signup">Criar conta com estes dados locais</button><button class="btn secondary" data-action="cloud-refresh">Atualizar status</button></div>`;
   if(isLocalMode()){
     return `<div class="cloud-panel"><p><b>Modo local ativo.</b></p><p class="muted">Seus treinos ficam neste aparelho. Para salvar na nuvem, crie uma conta e confirme o e-mail antes de limpar o app.</p><div class="actions"><button class="btn secondary" data-action="cloud-refresh">Atualizar IA/local</button></div></div><div class="alert orange"><div>⚠️</div><div><strong>Antes de limpar</strong><p>Crie uma conta primeiro para sincronizar seus dados. A limpeza local fica na Zona de segurança, no final desta tela.</p></div></div><div class="divider"></div>${upgradeForm}`;
   }
@@ -3093,7 +3213,7 @@ function bindScreen(){
     syncWorkoutDayCheckboxes(target);
   });
   document.querySelectorAll('[data-meal-check]').forEach(el=>el.onclick=()=>toggleNutritionMeal(Number(el.dataset.mealCheck)));
-  document.querySelectorAll('[data-switch-profile]').forEach(el=>el.onclick=()=>{state.activeProfileId=el.dataset.switchProfile; save(); render();});
+  document.querySelectorAll('[data-switch-profile]').forEach(el=>el.onclick=()=>activateDeviceProfile(el.dataset.switchProfile));
   document.querySelectorAll('[data-complete-lesson]').forEach(el=>el.onclick=()=>completeLesson(el.dataset.completeLesson));
   document.querySelectorAll('[data-edit-lesson]').forEach(el=>el.onclick=()=>openLessonModal(el.dataset.editLesson));
   document.querySelectorAll('[data-delete-lesson]').forEach(el=>el.onclick=()=>deleteLesson(el.dataset.deleteLesson));
@@ -3221,9 +3341,8 @@ function saveProfileForm(doRender=true){
   if(doRender){ toast('Perfil salvo.'); render(); }
 }
 async function createProfileFlow(){
-  if(supabaseClient){
-    try{ await supabaseClient.auth.signOut(); }catch(e){}
-  }
+  // Adding another account MUST NOT sign out or invalidate stored sessions.
+  await prepareNewAccountLogin();
   cloudUser=null;
   state.activeProfileId=null;
   state.onboardingDone=false;
@@ -3722,13 +3841,10 @@ function openProfileSwitcher(){
   layer.classList.remove('hidden');
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
   document.querySelectorAll('[data-modal-switch-profile]').forEach(b=>b.onclick=async()=>{
-    state.activeProfileId=b.dataset.modalSwitchProfile;
-    state.onboardingDone=true;
-    screen='home';
-    save();
+    const id=b.dataset.modalSwitchProfile;
     closeModal();
-    render();
-    toast('Conta alternada.');
+    await activateDeviceProfile(id);
+    toast('Perfil alternado.');
   });
   const openProfileBtn=document.querySelector('[data-modal-open-profile]'); if(openProfileBtn) openProfileBtn.onclick=()=>{closeModal(); setScreen('profile');};
   document.querySelector('[data-modal-new-profile]').onclick=()=>{closeModal(); createProfileFlow();};
@@ -3891,6 +4007,7 @@ async function cloudLogin(){
   const email=cleanEmailInput(byId('cloudEmail')?.value);
   const password=byId('cloudPassword')?.value || '';
   if(!isValidEmailInput(email) || !password) return toast('Informe um e-mail válido e a senha.');
+  await prepareNewAccountLogin();
   const { data, error } = await supabaseClient.auth.signInWithPassword({email,password});
   if(error) return toast(friendlyAuthError(error));
   cloudUser=data?.user || null;
@@ -3909,7 +4026,10 @@ async function cloudLogin(){
 }
 async function cloudSignup(){
   if(!supabaseClient) return toast('Supabase não carregou. Reabra o app.');
+  if(isOffline()) return toast('Conecte-se à internet para criar a conta. Seus dados locais permanecem salvos.');
   const p=profile();
+  if(!p || p.cloudUserId) return toast('Selecione um perfil local para criar sua conta.');
+  const originalProfileId=p.id;
   const name=byId('cloudName')?.value?.trim() || p.name || 'Usuário';
   const email=cleanEmailInput(byId('cloudEmail')?.value);
   const password=byId('cloudPassword')?.value || '';
@@ -3919,23 +4039,35 @@ async function cloudSignup(){
   if(passMsg) return toast(passMsg);
   if(password !== password2) return toast('As senhas não conferem.');
   if(!byId('cloudAcceptTerms')?.checked) return toast('Aceite os Termos e a Política de Privacidade.');
-  p.name=name; ensureProfile(p); markLegalAcceptance(p); save();
+  // Keep the whole profile (plan, workouts, nutrition, XP and history) intact.
+  // This marker makes email verification and later login finish on this SAME id.
+  p.name=name;
+  ensureProfile(p);
+  markLegalAcceptance(p);
+  p.pendingUpgradeEmail=email;
+  p.localUpgradeSyncPending=true;
+  save();
+  await prepareNewAccountLogin();
   const { data, error } = await supabaseClient.auth.signUp({email,password, options:{data:{display_name:name}, emailRedirectTo: window.location.origin + window.location.pathname}});
-  if(error) return toast('Erro ao criar conta: '+friendlyAuthError(error));
-
-  const user = data?.user || null;
-  const confirmed = !!(user?.email_confirmed_at || user?.confirmed_at);
+  if(error){
+    // Do not discard any local data; permit correcting email and retrying.
+    if(state.activeProfileId===originalProfileId){ delete p.pendingUpgradeEmail; delete p.pendingUpgradeUserId; delete p.localUpgradeSyncPending; save(); }
+    return toast('Erro ao criar conta: '+friendlyAuthError(error));
+  }
+  const user=data?.user||null;
+  if(user?.id){ p.pendingUpgradeUserId=user.id; save(); }
+  const confirmed=!!(user?.email_confirmed_at||user?.confirmed_at);
   if(data?.session?.access_token && confirmed){
-    cloudUser = data.session.user || user || null;
+    cloudUser=data.session.user||user;
     await completeVerifiedAccountSession();
-    await upsertCloudProfile(name);
-    await saveCurrentPlanToCloud('account_created_existing_plan').catch(()=>{});
-    toast('Conta criada e conectada.');
-  } else {
-    await supabaseClient.auth.signOut().catch(()=>{});
-    cloudUser = null;
-    setPendingEmailVerification(email);
-    toast('Conta criada. Confirme seu e-mail para liberar IA e nuvem.');
+    toast('Conta criada com o perfil local existente. Confira o status da sincronização.');
+  }else{
+    // Do not go back through the onboarding: the local profile remains active.
+    cloudUser=null;
+    state.entryMode='local';
+    state.onboardingDone=true;
+    save();
+    toast('Confira seu e-mail para confirmar a conta. Seus treinos e dados locais foram preservados. Depois, entre com o novo e-mail para sincronizar.');
   }
   render();
 }
@@ -3994,59 +4126,62 @@ async function deleteActiveLocalProfile(){
   render();
   toast('Perfil local apagado deste aparelho.');
 }
-async function deleteAccountFlow(){
-  if(isLocalMode() || !hasCloudAccount()) return deleteActiveLocalProfile();
-  const p=profile();
-  const email=cloudUser?.email || p.accountEmail || '';
-  const ok=confirm(`Excluir permanentemente esta conta?\n\nConta: ${email}\n\nIsso tenta apagar seus dados da nuvem e remover o login desta conta. Esta ação não é o mesmo que sair do aparelho e não deve ser usada só para limpar cache.`);
-  if(!ok) return;
-  const t=prompt('Digite EXCLUIR CONTA para confirmar:');
-  if(t !== 'EXCLUIR CONTA') return toast('Exclusão cancelada.');
-  const accessToken=await getCloudAccessToken();
-  if(!accessToken) return toast('Sessão expirada. Entre novamente para excluir a conta.');
-  try{
-    const base=String(AI_BACKEND_URL||'').trim().replace(/\/+$/,'');
-    const response=await fetch(base + DELETE_ACCOUNT_ENDPOINT_PATH, {
-      method:'POST',
-      headers:{'Content-Type':'application/json', 'Authorization':`Bearer ${accessToken}`},
-      body:JSON.stringify({confirm:'EXCLUIR CONTA'})
-    });
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok) throw new Error(data.error || `Erro HTTP ${response.status}`);
-    const deletedUserId=cloudUser?.id;
-    try{ await supabaseClient.auth.signOut(); }catch(e){}
-    state.profiles=(state.profiles||[]).filter(x=>x.cloudUserId !== deletedUserId && x.accountEmail !== email);
-    state.activeProfileId=state.profiles[0]?.id || null;
-    if(!state.activeProfileId){
-      state.onboardingDone=false;
-      state.entryMode=null;
-      onboardingView='login';
-      screen='home';
-    }
-    cloudUser=null;
-    save();
-    await clearAppRuntimeCache();
-    render();
-    toast('Conta excluída e dados locais limpos.');
-  }catch(e){
-    toast('Não consegui excluir a conta: '+(e.message||'erro'));
+async function removeOnlySelectedProfile(id){
+  state.profiles=(state.profiles||[]).filter(p=>p.id!==id);
+  const next=state.profiles[0];
+  if(next){await activateDeviceProfile(next.id);}
+  else{
+    state.activeProfileId=null;state.onboardingDone=false;state.entryMode=null;
+    onboardingView='login';screen='home';
+    await prepareNewAccountLogin();save();render();
   }
 }
-async function localLogoutWarning(){
-  return deleteActiveLocalProfile();
+async function verifiedDeletionIdentity(){
+  const p=profile();
+  if(!p?.cloudUserId || !p?.authStorageKey || !hasCloudAccount()) throw Error('Esta conta não possui sessão ativa. Entre novamente nela antes de excluir.');
+  const {data,error}=await supabaseClient.auth.getUser();
+  if(error || !data?.user || data.user.id!==p.cloudUserId || data.user.id!==cloudUser?.id)
+    throw Error('Bloqueado: a sessão autenticada não corresponde ao perfil aberto.');
+  const {data:sessionData}=await supabaseClient.auth.getSession();
+  if(!sessionData?.session || sessionData.session.user.id!==p.cloudUserId) throw Error('Sessão diferente do perfil selecionado.');
+  return {id:p.cloudUserId,email:data.user.email||'',token:sessionData.session.access_token,profileId:p.id};
 }
+async function deleteAccountFlow(){
+  const p=profile();
+  if(!p?.cloudUserId) return toast('Este perfil é local. Use a opção para remover o perfil deste dispositivo.');
+  let identity;
+  try{identity=await verifiedDeletionIdentity();}catch(e){return toast(e.message);}
+  if(!confirm(`EXCLUIR PERMANENTEMENTE a conta ${identity.email}?\n\nA exclusão apaga seus dados na nuvem e não pode ser desfeita. As outras contas permanecerão.`))return;
+  const answer=prompt(`Para excluir ${identity.email}, digite EXCLUIR CONTA:`);
+  if(answer!=='EXCLUIR CONTA') return toast('Exclusão cancelada.');
+  try{
+    // Revalidate immediately before the irreversible server request.
+    const check=await verifiedDeletionIdentity();
+    if(check.id!==identity.id || check.profileId!==identity.profileId) throw Error('O perfil mudou durante a confirmação.');
+    const response=await fetch(String(AI_BACKEND_URL||'').trim().replace(/\/+$/,'')+DELETE_ACCOUNT_ENDPOINT_PATH,{
+      method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${check.token}`},
+      body:JSON.stringify({confirm:'EXCLUIR CONTA',expectedUserId:check.id})
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok) throw Error(data.error||`Erro HTTP ${response.status}`);
+    if(data.deletedUserId!==check.id) throw Error('Resposta de exclusão inesperada. Verifique o servidor.');
+    await supabaseClient.auth.signOut({scope:'local'}).catch(()=>{});
+    await removeOnlySelectedProfile(check.profileId);
+    toast('A conta selecionada foi excluída. As outras contas foram preservadas.');
+  }catch(e){toast('Não consegui excluir: '+e.message);}
+}
+async function localLogoutWarning(){return deleteActiveLocalProfile();}
 async function cloudLogout(){
-  if(!supabaseClient) return;
-  const ok = confirm('Sair da conta neste aparelho e limpar o cache local?\n\nIsso NÃO exclui sua conta na nuvem. O Gym Bronze vai tentar sincronizar seus dados antes de sair e depois este aparelho volta para a tela inicial.');
-  if(!ok) return;
-  toast('Sincronizando dados antes de sair...');
-  await syncCurrentDataBeforeLogout();
-  try{ await supabaseClient.auth.signOut(); }catch(e){ console.warn('Falha ao sair do Supabase:', e); }
-  await clearAppRuntimeCache();
-  await hardResetLocalAppState();
-  save();
-  toast('Você saiu. Cache local limpo.');
-  render();
+  const p=profile();
+  if(!p?.cloudUserId) return deleteActiveLocalProfile();
+  const id=p.id;
+  if(!confirm(`Sair de ${p.accountEmail||p.name} apenas neste aparelho?\n\nSua conta e seus dados na nuvem serão preservados. Os outros perfis continuarão no aparelho.`))return;
+  if(hasCloudAccount()) await syncCurrentDataBeforeLogout();
+  if(p.authStorageKey && hasCloudAccount()){
+    try{await supabaseClient.auth.signOut({scope:'local'});}catch(e){return toast('Não foi possível encerrar esta sessão: '+e.message);}
+  }
+  await removeOnlySelectedProfile(id);
+  toast('Somente a conta selecionada saiu deste aparelho.');
 }
 async function upsertCloudProfile(name=null, sourceInfo=null){
   const user=await getCurrentCloudUser();
