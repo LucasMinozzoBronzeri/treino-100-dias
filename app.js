@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.7.3';
+const APP_VERSION = '7.7.4';
 const PUSH_API_PATH = '/api/push-subscription';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
@@ -1664,17 +1664,29 @@ const reminderWritesPending=new Set();
 function noteReminderEdit(event){
   if(screen==='profile' && event.target?.closest?.('.routine-panel')) reminderEditRevision++;
 }
-async function refreshProfileRemindersForDisplay(selectedProfileId){
+async function refreshProfileRemindersForDisplay(selectedProfileId, explicit=false){
   const selected=state.profiles.find(p=>p.id===selectedProfileId);
-  if(!selected?.cloudUserId || !supabaseClient || isOffline() || reminderWritesPending.has(selectedProfileId)) return;
+  if(!selected?.cloudUserId){ if(explicit) toast('Este perfil ainda é local.'); return; }
+  if(!supabaseClient || isOffline()){if(explicit) toast('Sem conexão com o Supabase.');return;}
+  if(reminderWritesPending.has(selectedProfileId)){
+    if(explicit) toast('Aguarde o salvamento atual terminar antes de recarregar.');
+    return;
+  }
   const requestRevision=reminderEditRevision;
   try{
     const user=await getCurrentCloudUser();
-    if(!user || user.id!==selected.cloudUserId) return;
+    if(!user || user.id!==selected.cloudUserId){
+      if(explicit) toast('Sessão desta conta indisponível. Entre novamente nesta conta para sincronizar.');
+      return;
+    }
     const {data,error}=await supabaseClient.from('profiles').select('reminders,routine').eq('id',user.id).maybeSingle();
     if(error) throw error;
-    if(!data || screen!=='profile' || state.activeProfileId!==selectedProfileId ||
-       reminderEditRevision!==requestRevision || reminderWritesPending.has(selectedProfileId)) return;
+    if(!data) throw new Error('Perfil não encontrado no Supabase.');
+    if(screen!=='profile' || state.activeProfileId!==selectedProfileId ||
+       reminderEditRevision!==requestRevision || reminderWritesPending.has(selectedProfileId)){
+      if(explicit) toast('Há uma edição em andamento. Salve antes de recarregar os horários.');
+      return;
+    }
     const current=state.profiles.find(p=>p.id===selectedProfileId);
     if(!current || current.cloudUserId!==user.id) return;
     if(data.reminders && typeof data.reminders==='object'){
@@ -1685,13 +1697,18 @@ async function refreshProfileRemindersForDisplay(selectedProfileId){
     }
     if(data.routine && typeof data.routine==='object') current.routine={...(current.routine||{}),...data.routine};
     ensureProfile(current);save();
-    // Update only the fields, not the whole page (which would close <details>).
-    // Never replace values once the user has started editing.
     for(const field of document.querySelectorAll('.routine-panel [data-profile-field]')){
       const value=field.dataset.profileField.split('.').reduce((obj,k)=>obj?.[k],current);
-      if(value!==undefined && document.activeElement!==field) field.value=String(value);
+      if(value!==undefined && (explicit || document.activeElement!==field)) field.value=String(value);
     }
-  }catch(e){console.warn('Não foi possível atualizar lembretes da nuvem:',e);}
+    for(const box of document.querySelectorAll('.routine-panel [data-reminder-type]')) {
+      box.checked=!!current.reminders?.types?.[box.dataset.reminderType];
+    }
+    if(explicit) toast('Horários carregados do Supabase. Água: '+(current.reminders?.water?.start||'—')+' até '+(current.reminders?.water?.end||'—')+'.');
+  }catch(e){
+    console.warn('Falha ao recuperar os horários do Supabase:',e);
+    if(explicit) toast('Não foi possível ler os horários do Supabase: '+(e?.message||'erro desconhecido'));
+  }
 }
 function setScreen(s, opts={}){
   screen=s;
@@ -3195,7 +3212,7 @@ function renderProfile(){
     <summary><span>Rotina e lembretes</span><small>treino, refeição e água</small></summary>
     <section class="card"><div class="card-title"><div><h3>Lembretes inteligentes</h3><p>Use seus horários para organizar nutrição e lembretes. Funciona melhor com o app instalado.</p></div><span class="badge orange">v7.3</span></div>
       ${remindersPanelHTML(p)}
-      <div class="actions"><button class="btn" data-action="save-profile">Salvar rotina</button><button class="btn secondary" data-action="request-notifications">Ativar notificações</button><button class="btn secondary" data-action="test-notification">Testar notificação</button><button class="btn secondary" data-action="disable-push">Desativar Web Push neste aparelho</button></div>
+      <div class="actions"><button class="btn" data-action="save-profile">Salvar rotina</button><button class="btn secondary" data-action="refresh-reminder-times">Recarregar horários da nuvem</button><button class="btn secondary" data-action="request-notifications">Ativar notificações</button><button class="btn secondary" data-action="test-notification">Testar notificação</button><button class="btn secondary" data-action="disable-push">Desativar Web Push neste aparelho</button></div>
       <p class="muted">Web Push em segundo plano requer navegador compatível, conta conectada e serviço de envio configurado.</p>
     </section>
   </details>
@@ -3263,6 +3280,7 @@ function handleAction(a){
   if(a==='start-current'){ const w=currentWorkout(); if(!w) return toast('Gere um treino primeiro.'); openWorkout(w.id); }
   if(a==='new-profile') createProfileFlow();
   if(a==='save-profile') saveProfileForm();
+  if(a==='refresh-reminder-times') refreshProfileRemindersForDisplay(state.activeProfileId,true);
   if(a==='backup') exportBackup();
   if(a==='import-backup') byId('backupInput').click();
   if(a==='reset-profile') resetProfileFlow();
