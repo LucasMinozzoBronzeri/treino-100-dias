@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gym-bronze-v7-6-4-report-hotfix';
+const CACHE_NAME = 'gym-bronze-v7-7-0-web-push';
 const ASSETS = [
   './',
   './index.html',
@@ -42,4 +42,16 @@ self.addEventListener('notificationclick', event => {
     }
     if (clients.openWindow) return clients.openWindow('./');
   })());
+});
+
+
+self.addEventListener('push', event => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch { payload={body:event.data?.text()||''}; }
+  event.waitUntil(self.registration.showNotification(payload.title || 'Gym Bronze', {
+    body: payload.body || 'Seu lembrete chegou.',
+    icon: './icons/icon-192.png', badge:'./icons/icon-192.png',
+    tag:payload.tag || 'gym-bronze-push',
+    data: {url:'./'}, renotify:false
+  }));
 });

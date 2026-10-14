@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.6.4';
+const APP_VERSION = '7.7.0';
+const PUSH_API_PATH = '/api/push-subscription';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
 const AI_DIET_ENDPOINT_PATH = '/api/diet-plan';
@@ -1784,6 +1785,24 @@ function onboardingPersonalFields(prefix){
     <div class="field" style="grid-column:1/-1"><label>Observações importantes</label><textarea id="${prefix}Notes" placeholder="Dor, limitação, tempo disponível, exercícios que gosta/não gosta, restrições alimentares..."></textarea></div>
   </div>`;
 }
+function onboardingWorkoutDaysHTML(prefix){
+  return `<div class="field" style="grid-column:1/-1" data-onboarding-training-days="${prefix}">
+    <label>Quais dias você pretende treinar?</label>
+    <div class="reminder-checks">${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map((day,i)=>`<label class="legal-check"><input type="checkbox" data-onboarding-weekday="${prefix}" value="${i}"><span>${day}</span></label>`).join('')}</div>
+    <p class="muted" data-onboarding-days-hint="${prefix}"></p>
+  </div>`;
+}
+function syncOnboardingWorkoutDays(prefix, reset=false, changedDay=null){
+  const boxes=[...document.querySelectorAll(`[data-onboarding-weekday="${prefix}"]`)];
+  if(!boxes.length) return;
+  const target=clampTrainingDays(byId(prefix+'Days')?.value || 5);
+  let selected=reset?suggestedTrainingWeekdays(target):boxes.filter(el=>el.checked).map(el=>Number(el.value));
+  if(changedDay!==null && selected.length>target) selected=[changedDay,...selected.filter(d=>d!==changedDay)].slice(0,target);
+  selected=normalizedTrainingWeekdays(selected,target);
+  boxes.forEach(el=>{el.checked=selected.includes(Number(el.value));});
+  const hint=document.querySelector(`[data-onboarding-days-hint="${prefix}"]`);
+  if(hint)hint.textContent=`${target} dias de treino e ${7-target} de descanso por semana. Selecione os ${target} dias em que deseja treinar.`;
+}
 function onboardingRoutineFields(prefix){
   return `<div class="onboarding-routine">
     <div class="form-grid">
@@ -1793,6 +1812,7 @@ function onboardingRoutineFields(prefix){
       <div class="field"><label>Horário de treino, se souber</label><input class="input" id="${prefix}WorkoutTime" type="time" value="12:00"></div>
       <div class="field" style="grid-column:1/-1"><label>Quer contar como funciona seu dia útil?</label><textarea id="${prefix}WorkdayDescription" placeholder="ex: acordo tarde, trabalho no computador, treino perto do almoço, chego cansado à noite..."></textarea></div>
     </div>
+    ${onboardingWorkoutDaysHTML(prefix)}
     <div class="reminder-checks">
       <label class="legal-check"><input type="checkbox" id="${prefix}RemWorkout"> <span>Receber lembrete de treino</span></label>
       <label class="legal-check"><input type="checkbox" id="${prefix}RemMeals"> <span>Receber lembretes de refeição</span></label>
@@ -1821,6 +1841,7 @@ function onboardingProfileFields(prefix){
         <div class="field"><label>Horário de treino, se souber</label><input class="input" id="${prefix}WorkoutTime" type="time" value="12:00"></div>
         <div class="field" style="grid-column:1/-1"><label>Quer contar como funciona seu dia útil?</label><textarea id="${prefix}WorkdayDescription" placeholder="ex: acordo tarde, treino no almoço, trabalho à tarde, chego cansado à noite..."></textarea></div>
       </div>
+      ${onboardingWorkoutDaysHTML(prefix)}
       <div class="reminder-checks">
         <label class="legal-check"><input type="checkbox" id="${prefix}RemWorkout"> <span>Receber lembrete de treino</span></label>
         <label class="legal-check"><input type="checkbox" id="${prefix}RemMeals"> <span>Receber lembretes de refeição</span></label>
@@ -1833,13 +1854,25 @@ function onboardingProfileFields(prefix){
 }
 function bindOnboarding(){
   document.querySelectorAll('[data-onboarding]').forEach(btn=>btn.onclick=()=>handleOnboarding(btn.dataset.onboarding));
+  for(const prefix of ['signup','google','local']){
+    byId(prefix+'Days')?.addEventListener('change',()=>syncOnboardingWorkoutDays(prefix,true));
+    document.querySelectorAll(`[data-onboarding-weekday="${prefix}"]`).forEach(el=>el.addEventListener('change',()=>{
+      const target=clampTrainingDays(byId(prefix+'Days')?.value || 5);
+      const selected=document.querySelectorAll(`[data-onboarding-weekday="${prefix}"]:checked`).length;
+      if(selected<target){el.checked=true;toast(`Escolha ${target} dias de treino; no máximo ${7-target} dias de descanso.`);}
+      else syncOnboardingWorkoutDays(prefix,false,Number(el.value));
+    }));
+  }
   if(onboardingView==='signup') setSignupStep(signupStep);
   if(state.pendingProfileCompletion) setGoogleStep(googleStep);
   if(state.pendingProfileCompletion){
     const p=profile() || {};
     const map={Name:p.name||state.pendingProfileCompletion.name||'', Age:p.age||'', Sex:p.sex||'', Height:p.height||'', Weight:p.weight||'', Goal:p.goal||'', Focus:p.focus||'', Experience:p.experience||'Iniciante', Days:p.daysPerWeek||'5', WakeTime:p.routine?.wakeTime||'09:00', LunchTime:p.routine?.lunchTime||'13:00', DinnerTime:p.routine?.dinnerTime||'20:00', WorkoutTime:p.reminders?.times?.workout||'12:00', WorkdayDescription:p.routine?.workdayDescription||'', Notes:p.notes||''};
     Object.entries(map).forEach(([k,v])=>{ const el=byId('google'+k); if(el && !el.value) el.value=v; });
+    const existingDays=normalizedTrainingWeekdays(p.reminders?.workoutDays,p.daysPerWeek);
+    document.querySelectorAll('[data-onboarding-weekday="google"]').forEach(el=>{el.checked=existingDays.includes(Number(el.value));});
   }
+  for(const prefix of ['signup','google','local']) syncOnboardingWorkoutDays(prefix);
 }
 function handleOnboarding(action){
   if(action==='show-signup'){ onboardingView='signup'; signupStep=1; render(); return; }
@@ -1932,6 +1965,7 @@ function readOnboardingProfile(prefix){
     reminders:{
       enabled: !!(byId(prefix+'RemWorkout')?.checked || byId(prefix+'RemMeals')?.checked || byId(prefix+'RemWater')?.checked),
       types:{workout:!!byId(prefix+'RemWorkout')?.checked, meals:!!byId(prefix+'RemMeals')?.checked, water:!!byId(prefix+'RemWater')?.checked},
+      workoutDays: normalizedTrainingWeekdays([...document.querySelectorAll(`[data-onboarding-weekday="${prefix}"]:checked`)].map(el=>Number(el.value)),byId(prefix+'Days')?.value || 5),
       times:{workout: normalizeTimeText(byId(prefix+'WorkoutTime')?.value, '12:00')},
       water:{intervalHours:2, start:normalizeTimeText(byId(prefix+'WakeTime')?.value, '09:00'), end:'21:00'}
     },
@@ -2261,6 +2295,7 @@ function applyProfileInfo(info, targetProfile=null){
   }
   applyProgramDuration(p);
   ensureProfile(p);
+  p.reminders.workoutDays=normalizedTrainingWeekdays(p.reminders.workoutDays,p.daysPerWeek);
   if(!Array.isArray(p.workouts) || !p.workouts.length){
     p.queue=[];
     p.planMeta={source:'pending', cycle:p.planMeta?.cycle || 1, title:'Aguardando treino inteligente', notes:'O app vai tentar gerar um treino específico com IA. Se falhar, você pode usar o treino padrão.'};
@@ -2919,9 +2954,44 @@ function remindersPanelHTML(p){
       <label class="legal-check"><input type="checkbox" data-reminder-type="meals" ${types.meals?'checked':''}> <span>Lembretes de refeição</span></label>
       <label class="legal-check"><input type="checkbox" data-reminder-type="water" ${types.water?'checked':''}> <span>Lembrete de beber água</span></label>
     </div>
-    <p class="muted">Resumo: ${esc(remindersSummary(p))} • Permissão neste aparelho: ${esc(permissionLabel)}.</p><div class="actions"><button class="btn sm secondary" data-action="suggest-workout-time">Sugerir melhor horário de treino</button></div>
+    <div class="field" style="grid-column:1/-1"><label>Dias de treino para notificações</label>
+      <div class="reminder-checks">${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map((name,i)=>`<label class="legal-check"><input type="checkbox" data-workout-weekday="${i}" ${trainingWeekdays(p).includes(i)?'checked':''}><span>${name}</span></label>`).join('')}</div>
+      <p class="muted" data-workout-days-hint>${clampTrainingDays(p.daysPerWeek)} dias de treino e ${7-clampTrainingDays(p.daysPerWeek)} de descanso por semana. Escolha exatamente ${clampTrainingDays(p.daysPerWeek)} dias para receber lembretes.</p>
+    </div>
+    <p class="muted">Resumo: ${esc(remindersSummary(p))} • Permissão neste aparelho: ${esc(permissionLabel)}. ${hasCloudAccount()?'Web Push disponível para esta conta.':'Para receber com o app fechado, entre em uma conta verificada.'}</p><div class="actions"><button class="btn sm secondary" data-action="suggest-workout-time">Sugerir melhor horário de treino</button></div>
   </div>`;
 }
+
+// v7.7.0: dia da semana (0=domingo) definido pelo próprio usuário.
+function suggestedTrainingWeekdays(days){
+  const presets={2:[1,4],3:[1,3,5],4:[1,2,4,5],5:[1,2,3,4,5],6:[1,2,3,4,5,6]};
+  return presets[clampTrainingDays(days)] || presets[5];
+}
+function normalizedTrainingWeekdays(selected, daysPerWeek){
+  const target=clampTrainingDays(daysPerWeek);
+  const valid=Array.isArray(selected) ? [...new Set(selected.filter(n=>Number.isInteger(n)&&n>=0&&n<=6))] : [];
+  // Preferir os dias já escolhidos, completar os faltantes e nunca ultrapassar a frequência.
+  for(const day of suggestedTrainingWeekdays(target)) if(valid.length<target && !valid.includes(day)) valid.push(day);
+  for(let day=0;day<7 && valid.length<target;day++) if(!valid.includes(day)) valid.push(day);
+  return valid.slice(0,target).sort((a,b)=>a-b);
+}
+function trainingWeekdays(p){
+  return normalizedTrainingWeekdays(p?.reminders?.workoutDays,p?.daysPerWeek);
+}
+function syncWorkoutDayCheckboxes(targetDays, editedDay=null){
+  const inputs=[...document.querySelectorAll('[data-workout-weekday]')];
+  if(!inputs.length)return;
+  const target=clampTrainingDays(targetDays);
+  let selected=inputs.filter(el=>el.checked).map(el=>Number(el.dataset.workoutWeekday));
+  if(editedDay!==null && selected.length>target){
+    selected=[editedDay, ...selected.filter(day=>day!==editedDay)].slice(0,target);
+  }
+  selected=normalizedTrainingWeekdays(selected,target);
+  inputs.forEach(el=>el.checked=selected.includes(Number(el.dataset.workoutWeekday)));
+  const hint=document.querySelector('[data-workout-days-hint]');
+  if(hint)hint.textContent=`${target} dias de treino e ${7-target} de descanso por semana. Escolha exatamente ${target} dias para receber lembretes.`;
+}
+function isTrainingWeekday(p,date=new Date()){return trainingWeekdays(p).includes(date.getDay());}
 
 function renderProfile(){
   const p=profile();
@@ -2965,8 +3035,8 @@ function renderProfile(){
     <summary><span>Rotina e lembretes</span><small>treino, refeição e água</small></summary>
     <section class="card"><div class="card-title"><div><h3>Lembretes inteligentes</h3><p>Use seus horários para organizar nutrição e lembretes. Funciona melhor com o app instalado.</p></div><span class="badge orange">v7.3</span></div>
       ${remindersPanelHTML(p)}
-      <div class="actions"><button class="btn" data-action="save-profile">Salvar rotina</button><button class="btn secondary" data-action="request-notifications">Ativar notificações</button><button class="btn secondary" data-action="test-notification">Testar notificação</button></div>
-      <p class="muted">No PWA, lembretes locais dependem do navegador. Push real com servidor pode entrar em uma versão futura.</p>
+      <div class="actions"><button class="btn" data-action="save-profile">Salvar rotina</button><button class="btn secondary" data-action="request-notifications">Ativar notificações</button><button class="btn secondary" data-action="test-notification">Testar notificação</button><button class="btn secondary" data-action="disable-push">Desativar Web Push neste aparelho</button></div>
+      <p class="muted">Web Push em segundo plano requer navegador compatível, conta conectada e serviço de envio configurado.</p>
     </section>
   </details>
 
@@ -3009,6 +3079,19 @@ function bindScreen(){
   document.querySelectorAll('[data-screen-go]').forEach(el=>el.onclick=()=>setScreen(el.dataset.screenGo));
   document.querySelectorAll('[data-open-workout]').forEach(el=>el.onclick=()=>openWorkout(el.dataset.openWorkout));
   document.querySelectorAll('[data-action]').forEach(el=>el.onclick=()=>handleAction(el.dataset.action));
+  document.querySelectorAll('[data-workout-weekday]').forEach(el=>el.addEventListener('change',()=>{
+    const target=clampTrainingDays(document.querySelector('[data-profile-field="daysPerWeek"]')?.value || profile().daysPerWeek);
+    const selected=document.querySelectorAll('[data-workout-weekday]:checked').length;
+    if(selected<target){el.checked=true;toast(`Escolha ${target} dias de treino. Você pode ter no máximo ${7-target} dias de descanso.`);}
+    else syncWorkoutDayCheckboxes(target,Number(el.dataset.workoutWeekday));
+  }));
+  document.querySelector('[data-profile-field="daysPerWeek"]')?.addEventListener('change',e=>{
+    const target=clampTrainingDays(e.target.value);
+    // Ao alterar a frequência, iniciar com uma distribuição equilibrada, ajustável pelo usuário.
+    const selected=suggestedTrainingWeekdays(target);
+    document.querySelectorAll('[data-workout-weekday]').forEach(el=>el.checked=selected.includes(Number(el.dataset.workoutWeekday)));
+    syncWorkoutDayCheckboxes(target);
+  });
   document.querySelectorAll('[data-meal-check]').forEach(el=>el.onclick=()=>toggleNutritionMeal(Number(el.dataset.mealCheck)));
   document.querySelectorAll('[data-switch-profile]').forEach(el=>el.onclick=()=>{state.activeProfileId=el.dataset.switchProfile; save(); render();});
   document.querySelectorAll('[data-complete-lesson]').forEach(el=>el.onclick=()=>completeLesson(el.dataset.completeLesson));
@@ -3030,6 +3113,7 @@ function handleAction(a){
   if(a==='test-ai') testAIConnection();
   if(a==='request-notifications') requestNotificationsFlow();
   if(a==='test-notification') testReminderNotification();
+  if(a==='disable-push') disableWebPush();
   if(a==='suggest-workout-time') openWorkoutTimeSuggestionModal();
   if(a==='cloud-login') cloudLogin();
   if(a==='cloud-signup') cloudSignup();
@@ -3084,7 +3168,10 @@ async function requestNotificationsFlow(){
     p.reminders.enabled=true;
   }
   save(); render();
-  toast(ok?'Notificações ativadas neste aparelho.':'O navegador não liberou notificações agora.');
+  if(ok && hasCloudAccount()){
+    try{ await enableWebPush(); toast('Web Push ativado! Receberá avisos mesmo com o app fechado.'); }
+    catch(e){ console.warn(e); toast('Permissão ativada, mas Web Push não foi configurado: '+e.message); }
+  } else toast(ok?'Notificações locais ativadas. Entre na conta para Web Push.':'O navegador não liberou notificações agora.');
 }
 function testReminderNotification(){
   saveProfileForm(false);
@@ -3107,6 +3194,8 @@ function saveProfileForm(doRender=true){
     p.reminders.types[f.dataset.reminderType]=f.checked;
   });
   ensureProfile(p);
+  const chosenWorkoutDays=Array.from(document.querySelectorAll('[data-workout-weekday]')).filter(f=>f.checked).map(f=>Number(f.dataset.workoutWeekday));
+  p.reminders.workoutDays=normalizedTrainingWeekdays(chosenWorkoutDays.length?chosenWorkoutDays:p.reminders.workoutDays,p.daysPerWeek);
   p.reminders.enabled=!!(p.reminders.types?.workout||p.reminders.types?.meals||p.reminders.types?.water);
   p.routine.wakeTime=normalizeTimeText(p.routine.wakeTime,'09:00');
   p.routine.lunchTime=normalizeTimeText(p.routine.lunchTime,'13:00');
@@ -3115,8 +3204,10 @@ function saveProfileForm(doRender=true){
   p.reminders.water.start=normalizeTimeText(p.reminders.water.start,p.routine.wakeTime||'09:00');
   p.reminders.water.end=normalizeTimeText(p.reminders.water.end,'21:00');
   p.reminders.water.intervalHours=Math.max(1, Math.min(4, Number(p.reminders.water.intervalHours||2)));
+  p.reminders.timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone||'America/Sao_Paulo';
   p.experience = normalizeExperienceLabel(p.experience);
   p.daysPerWeek = String(clampTrainingDays(p.daysPerWeek));
+  p.reminders.workoutDays=normalizedTrainingWeekdays(p.reminders.workoutDays,p.daysPerWeek);
   if(p.planMeta?.source === 'default' && !(p.history&&p.history.length) && (beforeDays !== p.daysPerWeek || beforeExp !== p.experience)){
     applyDefaultPlanForProfile(p, true);
   }
@@ -4516,6 +4607,7 @@ function timeToMinutes(t){ const m=String(t||'').match(/^(\d{1,2}):(\d{2})/); re
 function maybeTriggerLocalReminders(){
   const p=profile();
   if(!p?.reminders?.enabled || !notificationAvailable() || Notification.permission!=='granted') return;
+  if(window.__gymWebPushActive) return;
   const now=new Date();
   const mins=now.getHours()*60+now.getMinutes();
   const day=dateKey(now);
@@ -4526,7 +4618,7 @@ function maybeTriggerLocalReminders(){
     showReminderNotification(title, body);
   };
   const rem=p.reminders;
-  if(rem.types?.workout && mins===timeToMinutes(rem.times?.workout||'12:00') && !workoutDoneToday(p)){
+  if(rem.types?.workout && mins===timeToMinutes(rem.times?.workout||'12:00') && isTrainingWeekday(p,now) && !workoutDoneToday(p)){
     const w=currentWorkout(p);
     emit('workout','Hora do treino 💪', w?`Hoje é ${w.id} — ${w.name}. Bora manter a sequência?`:'Bora treinar hoje?');
   }
@@ -4551,6 +4643,55 @@ function startReminderLoop(){
   maybeTriggerLocalReminders();
   __reminderTimer=setInterval(maybeTriggerLocalReminders, 60*1000);
 }
+
+
+// Web Push v7.7.0: navegador/SW recebe mesmo com a página fechada.
+function pushSupported(){ return isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && notificationAvailable(); }
+function vapidBytes(base64){const data=atob(base64.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(base64.length/4)*4,'='));return Uint8Array.from(data,c=>c.charCodeAt(0));}
+async function pushRequest(method,body){
+  if(!supabaseClient || !hasCloudAccount()) throw new Error('Entre em uma conta verificada.');
+  const {data}=await supabaseClient.auth.getSession();
+  const token=data?.session?.access_token;
+  if(!token) throw new Error('Sessão expirada. Faça login novamente.');
+  const res=await fetch(AI_BACKEND_URL+PUSH_API_PATH,{method,headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:body?JSON.stringify(body):undefined});
+  const json=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(json.error||'Falha ao configurar Web Push.');
+  return json;
+}
+async function enableWebPush(){
+  if(!pushSupported()) throw new Error('Web Push não disponível neste navegador. Use HTTPS/PWA.');
+  if(Notification.permission!=='granted') throw new Error('Permita notificações primeiro.');
+  const reg=await navigator.serviceWorker.ready;
+  const conf=await pushRequest('GET');
+  let sub=await reg.pushManager.getSubscription();
+  if(sub && conf.publicKey && JSON.stringify(Array.from(new Uint8Array(sub.options?.applicationServerKey||[])))!==JSON.stringify(Array.from(vapidBytes(conf.publicKey)))){
+    await sub.unsubscribe();sub=null;
+  }
+  if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:vapidBytes(conf.publicKey)});
+  await pushRequest('POST',{subscription:sub.toJSON(),timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone||'America/Sao_Paulo'});
+  window.__gymWebPushActive=true;
+  return true;
+}
+async function disableWebPush(){
+  if(!pushSupported()){toast('Web Push não disponível.');return;}
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.getSubscription();
+    if(sub && hasCloudAccount()) await pushRequest('DELETE',{endpoint:sub.endpoint});
+    if(sub) await sub.unsubscribe();
+    window.__gymWebPushActive=false;
+    toast('Web Push desativado neste aparelho.');
+  }catch(e){toast('Não foi possível desativar: '+e.message);}
+}
+async function restoreWebPushState(){
+  if(!pushSupported() || Notification.permission!=='granted') return;
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.getSubscription();
+    window.__gymWebPushActive=!!sub;
+  }catch(e){console.warn('Web Push:',e);}
+}
+restoreWebPushState();
 
 init();
 startReminderLoop();
