@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.7.5';
+const APP_VERSION = '7.7.6';
 const PUSH_API_PATH = '/api/push-subscription';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
@@ -1713,9 +1713,9 @@ async function refreshProfileRemindersForDisplay(selectedProfileId, explicit=fal
 function setScreen(s, opts={}){
   screen=s;
   render();
-  if(s==='profile' && state.activeProfileId) {
-    refreshProfileRemindersForDisplay(state.activeProfileId);
-  }
+  // v7.7.6: switching tabs is local UI navigation, never an implicit
+  // cloud refresh. The manual refresh action remains available to the user.
+  // A pending or stale network read must not overwrite newly saved inputs.
   if(opts.scrollTo){
     requestAnimationFrame(()=>scrollToSection(opts.scrollTo));
   }
@@ -3380,6 +3380,7 @@ function testReminderNotification(){
 
 function saveProfileForm(doRender=true){
   const p=profile();
+  reminderEditRevision++; // invalidates any in-flight cloud refresh
   const beforeDays = String(p.daysPerWeek||'');
   const beforeExp = String(p.experience||'');
   document.querySelectorAll('[data-profile-field]').forEach(f=>setProfileFieldValue(p, f.dataset.profileField, f.dataset.profileField==='height' ? formatHeightSmart(f.value) : f.value));
@@ -3419,6 +3420,7 @@ function saveProfileForm(doRender=true){
     reminderWritesPending.add(profileId);
     // Capture values at click time. A later asynchronous profile read must not
     // change what gets written to Supabase.
+    const saveRevision=reminderEditRevision;
     const snapshot={
       reminders:structuredClone(p.reminders),
       routine:structuredClone(p.routine),
@@ -3426,14 +3428,23 @@ function saveProfileForm(doRender=true){
       weight:p.weight, goal:p.goal, focus:p.focus, notes:p.notes,
       experience:p.experience, daysPerWeek:p.daysPerWeek
     };
-    saveRoutineSnapshotToCloud(profileId, snapshot).then(()=>{
-      reminderWritesPending.delete(profileId);
+    saveRoutineSnapshotToCloud(profileId, snapshot).then(data=>{
+      // Persist the values the server has ACTUALLY acknowledged. Do not
+      // update some other account if the user switched profiles meanwhile.
+      const current=state.profiles.find(x=>x.id===profileId);
+      if(current && current.cloudUserId===p.cloudUserId){
+        // A later edit must win over an older request completing late.
+        if(reminderEditRevision===saveRevision){
+          current.reminders=structuredClone(data.reminders);
+          current.routine={...(current.routine||{}),...(data.routine||{})};
+          save();
+        }
+      }
       if(doRender) toast('Perfil salvo e sincronizado com o Supabase.');
     }).catch(e=>{
-      // Keep local edits and prevent old cloud reads from replacing them.
       console.error('Falha ao salvar a rotina na nuvem:',e);
       toast('Salvo neste aparelho, mas NÃO sincronizado. Verifique a conexão e tente salvar novamente.');
-    });
+    }).finally(()=>{ reminderWritesPending.delete(profileId); });
   }
   if(doRender){
     toast(cloudIsConnected?'Salvo no aparelho. Sincronizando com Supabase…':'Perfil salvo neste aparelho.');
