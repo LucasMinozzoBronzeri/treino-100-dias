@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.7.2';
+const APP_VERSION = '7.7.3';
 const PUSH_API_PATH = '/api/push-subscription';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
@@ -1651,26 +1651,30 @@ function init(){
   window.addEventListener('offline', () => { toast('Modo offline: treino salvo só neste aparelho.'); render(); });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.addEventListener('click',()=>setScreen(btn.dataset.screen)));
+  document.addEventListener('input',noteReminderEdit);
+  document.addEventListener('change',noteReminderEdit);
   const quickBtn=byId('openQuickMenu'); if(quickBtn) quickBtn.addEventListener('click', openQuickMenuModal);
   byId('openProfileSwitcher').addEventListener('click', openProfileSwitcher);
   byId('openLevelModal')?.addEventListener('click', openLevelModal);
   render();
 }
-// v7.7.2: refresh the selected account's saved reminder settings before
-// displaying the profile. Never borrow the currently authenticated session
-// from a different local profile (multi-account safety).
+// v7.7.3: guard asynchronous cloud reads against local edits and pending writes.
+let reminderEditRevision=0;
+const reminderWritesPending=new Set();
+function noteReminderEdit(event){
+  if(screen==='profile' && event.target?.closest?.('.routine-panel')) reminderEditRevision++;
+}
 async function refreshProfileRemindersForDisplay(selectedProfileId){
   const selected=state.profiles.find(p=>p.id===selectedProfileId);
-  if(!selected?.cloudUserId || !supabaseClient || isOffline()) return;
+  if(!selected?.cloudUserId || !supabaseClient || isOffline() || reminderWritesPending.has(selectedProfileId)) return;
+  const requestRevision=reminderEditRevision;
   try{
     const user=await getCurrentCloudUser();
     if(!user || user.id!==selected.cloudUserId) return;
-    const {data,error}=await supabaseClient.from('profiles')
-      .select('reminders,routine').eq('id',user.id).maybeSingle();
+    const {data,error}=await supabaseClient.from('profiles').select('reminders,routine').eq('id',user.id).maybeSingle();
     if(error) throw error;
-    if(!data || state.activeProfileId!==selectedProfileId || screen!=='profile') return;
-    // Keep local and cloud values isolated to this profile. In particular,
-    // 00:00 is a valid time, not a missing value or default.
+    if(!data || screen!=='profile' || state.activeProfileId!==selectedProfileId ||
+       reminderEditRevision!==requestRevision || reminderWritesPending.has(selectedProfileId)) return;
     const current=state.profiles.find(p=>p.id===selectedProfileId);
     if(!current || current.cloudUserId!==user.id) return;
     if(data.reminders && typeof data.reminders==='object'){
@@ -1679,17 +1683,15 @@ async function refreshProfileRemindersForDisplay(selectedProfileId){
         times:{...(current.reminders?.times||{}),...(data.reminders.times||{})},
         water:{...(current.reminders?.water||{}),...(data.reminders.water||{})}};
     }
-    if(data.routine && typeof data.routine==='object'){
-      current.routine={...(current.routine||{}),...data.routine};
+    if(data.routine && typeof data.routine==='object') current.routine={...(current.routine||{}),...data.routine};
+    ensureProfile(current);save();
+    // Update only the fields, not the whole page (which would close <details>).
+    // Never replace values once the user has started editing.
+    for(const field of document.querySelectorAll('.routine-panel [data-profile-field]')){
+      const value=field.dataset.profileField.split('.').reduce((obj,k)=>obj?.[k],current);
+      if(value!==undefined && document.activeElement!==field) field.value=String(value);
     }
-    ensureProfile(current);
-    save();
-    // Avoid replacing any fields the user has already started editing.
-    const focused=document.activeElement;
-    const dirty=focused && focused.closest?.('.routine-panel') &&
-      ['INPUT','SELECT','TEXTAREA'].includes(focused.tagName);
-    if(!dirty) render();
-  }catch(e){ console.warn('Não foi possível atualizar lembretes da nuvem:',e); }
+  }catch(e){console.warn('Não foi possível atualizar lembretes da nuvem:',e);}
 }
 function setScreen(s, opts={}){
   screen=s;
@@ -3375,8 +3377,25 @@ function saveProfileForm(doRender=true){
     else p.ai[k]=f.value.trim();
   });
   save();
-  if(hasCloudAccount()) upsertCloudProfile(null).catch(()=>{});
-  if(doRender){ toast('Perfil salvo.'); render(); }
+  // Keep the selected profile locked against stale cloud reads until the server
+  // confirms the write. Do not report a successful cloud sync prematurely.
+  const profileId=p.id;
+  const cloudIsConnected=hasCloudAccount();
+  if(cloudIsConnected){
+    reminderWritesPending.add(profileId);
+    upsertCloudProfile(null).then(()=>{
+      reminderWritesPending.delete(profileId);
+      if(doRender) toast('Perfil salvo e sincronizado com o Supabase.');
+    }).catch(e=>{
+      // Leave a pending flag: a stale read must not erase unsynced local changes.
+      console.error('Falha ao salvar o perfil na nuvem:',e);
+      toast('Salvo neste aparelho, mas NÃO sincronizado. Verifique a conexão e tente salvar novamente.');
+    });
+  }
+  if(doRender){
+    toast(cloudIsConnected?'Salvo no aparelho. Sincronizando com Supabase…':'Perfil salvo neste aparelho.');
+    render();
+  }
 }
 async function createProfileFlow(){
   // Adding another account MUST NOT sign out or invalidate stored sessions.
