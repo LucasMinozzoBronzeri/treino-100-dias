@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.7.7';
+const APP_VERSION = '7.9.0';
 const PUSH_API_PATH = '/api/push-subscription';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
@@ -266,7 +266,8 @@ function migrateState(s){
   if(!s.version || s.version < 5) s.version = 5;
   return s;
 }
-function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function persistOnly(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function save(){ try{ markSnapshotDirty(); }catch(e){} persistOnly(); try{ scheduleSnapshotPush(); }catch(e){} }
 function hasActiveProfile(){ return !!(state.profiles && state.profiles.length && state.profiles.some(p=>p.id===state.activeProfileId)); }
 function profile(){ const p = state.profiles.find(p=>p.id===state.activeProfileId) || state.profiles[0] || null; return ensureProfile(p); }
 function ensureProfile(p){
@@ -550,7 +551,7 @@ function nextCommitmentHTML(p=profile()){
   if(!next){
     return `<section class="card compact-card next-commitment-card"><div class="card-title"><div><h3>Próximo compromisso</h3><p>Sem lembretes ativos para hoje.</p></div><span class="badge yellow">Rotina</span></div><p class="muted">Sugestão de treino: ${esc(rec.window)}. Ajuste isso no Perfil se sua rotina mudar.</p><div class="actions"><button class="btn sm secondary" data-action="suggest-workout-time">Sugerir horário</button></div></section>`;
   }
-  return `<section class="card compact-card next-commitment-card"><div class="card-title"><div><h3>Próximo compromisso</h3><p>${esc(next.icon)} ${esc(next.time)} — ${esc(next.title)}</p></div><span class="badge orange">${esc(next.type)}</span></div><p class="muted">${esc(next.detail || '')}</p><div class="actions"><button class="btn sm secondary" data-action="suggest-workout-time">Sugerir horário de treino</button></div></section>`;
+  return `<section class="card compact-card next-commitment-card"><div class="card-title"><div><h3>Próximo compromisso</h3><p>${esc(next.time)} — ${esc(next.title)}</p></div><span class="badge orange">${esc(next.type)}</span></div><p class="muted">${esc(next.detail || '')}</p><div class="actions"><button class="btn sm secondary" data-action="suggest-workout-time">Sugerir horário de treino</button></div></section>`;
 }
 function openWorkoutTimeSuggestionModal(){
   saveProfileForm(false);
@@ -579,9 +580,15 @@ function workoutById(p,id){ return p.workouts.find(w=>w.id===id); }
 function currentWorkout(p=profile()){ return workoutById(p, p.queue[0]); }
 function allExercises(p=profile()){ return p.workouts.flatMap(w=>w.exercises.map(e=>({...e, workoutId:w.id, workoutName:w.name}))); }
 
+// Chave de dia (AAAA-MM-DD) no fuso do aparelho. Não usar toISOString(): ele devolve UTC
+// e, no Brasil (UTC-3), o "dia" virava às 21h.
 function dateKey(d=new Date()){
   const x = d instanceof Date ? d : new Date(d);
-  return x.toISOString().slice(0,10);
+  if(Number.isNaN(x.getTime())) return '';
+  const y = x.getFullYear();
+  const m = String(x.getMonth()+1).padStart(2,'0');
+  const day = String(x.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
 }
 function startOfWeek(d=new Date()){
   const x=new Date(d);
@@ -698,7 +705,7 @@ function missionStripHTML(p=profile()){
   const st=activeDayInfo(p);
   const m=dailyFocusMission(p);
   const streakText = st.count ? `${st.count} dia${st.count>1?'s':''} ativo${st.count>1?'s':''}${st.activeToday?'':' • falta hoje'}` : 'comece hoje';
-  return `<div class="mission-strip"><div class="mission-main"><span>${esc(m.icon)}</span><div><strong>${esc(m.title)}</strong><small>${esc(m.text)}</small></div></div><div class="mission-side"><span class="streak-pill">🔥 ${esc(streakText)}</span><button class="btn sm secondary" data-action="${esc(m.action)}">${esc(m.cta)}</button></div></div>`;
+  return `<div class="mission-strip"><div class="mission-main"><span class="alert-ic">${uiIcon(m.icon)}</span><div><strong>${esc(m.title)}</strong><small>${esc(m.text)}</small></div></div><div class="mission-side"><span class="streak-pill">🔥 ${esc(streakText)}</span><button class="btn sm secondary" data-action="${esc(m.action)}">${esc(m.cta)}</button></div></div>`;
 }
 
 function dailyScore(p=profile()){
@@ -843,11 +850,11 @@ function openTodayWorkoutCenter(){
     </section>
     <section class="today-center-block">
       <div class="card-title"><div><h3>Escolher versão de hoje</h3><p>Versões mudam a lista de exercícios só para hoje.</p></div></div>
-      <div class="quick-grid coach-grid">${Object.entries(WORKOUT_VARIANTS).map(([key,item])=>`<button class="quick-item ${variant?.mode===key || (!variant&&key==='full')?'active':''}" data-center-variant="${key}" ${w?'':'disabled'}><b>${item.icon}</b><span><strong>${item.title}</strong><small>${item.desc}</small></span></button>`).join('')}</div>
+      <div class="quick-grid coach-grid">${Object.entries(WORKOUT_VARIANTS).map(([key,item])=>`<button class="quick-item ${variant?.mode===key || (!variant&&key==='full')?'active':''}" data-center-variant="${key}" ${w?'':'disabled'}><b>${uiIcon(item.icon)}</b><span><strong>${item.title}</strong><small>${item.desc}</small></span></button>`).join('')}</div>
     </section>
     <section class="today-center-block">
       <div class="card-title"><div><h3>Ajustar situação de hoje</h3><p>Ajustes orientam estratégia, prioridade e cuidado.</p></div></div>
-      <div class="quick-grid coach-grid">${Object.entries(QUICK_COACH_MODES).map(([key,item])=>`<button class="quick-item ${adj?.mode===key?'active':''}" data-center-coach="${key}" ${w?'':'disabled'}><b>${item.icon}</b><span><strong>${item.title}</strong><small>${item.desc}</small></span></button>`).join('')}</div>
+      <div class="quick-grid coach-grid">${Object.entries(QUICK_COACH_MODES).map(([key,item])=>`<button class="quick-item ${adj?.mode===key?'active':''}" data-center-coach="${key}" ${w?'':'disabled'}><b>${uiIcon(item.icon)}</b><span><strong>${item.title}</strong><small>${item.desc}</small></span></button>`).join('')}</div>
     </section>
     <p class="muted">Na próxima vez que esse treino aparecer, ele volta ao formato normal, a menos que você escolha uma nova versão naquele dia.</p>
   </div>`;
@@ -855,7 +862,7 @@ function openTodayWorkoutCenter(){
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
   document.querySelectorAll('[data-center-action]').forEach(b=>b.onclick=()=>{
     const action=b.dataset.centerAction;
-    if(action==='start'){ closeModal(); openWorkout(w.id); }
+    if(action==='start'){ closeModal(); goRunner(); }
     if(action==='edit'){ closeModal(); openEditWorkout(w.id); }
   });
   document.querySelectorAll('[data-center-variant]').forEach(b=>b.onclick=()=>applyWorkoutVariantFromCenter(b.dataset.centerVariant));
@@ -890,12 +897,12 @@ function openWorkoutVariantModal(mode=null){
   if(!mode){
     layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Versões do treino</p><h2>Escolha como treinar hoje</h2><p class="muted">A versão vale só para hoje e não altera seu treino fixo.</p></div><button class="close" data-close>×</button></div>
       ${w?`<div class="alert"><div>🏋️</div><div><strong>${esc(w.id)} — ${esc(w.name)}</strong><p>${w.exercises.length} exercícios no treino original</p></div></div>`:'<div class="empty">Nenhum treino ativo ainda.</div>'}
-      <div class="quick-grid coach-grid">${Object.entries(WORKOUT_VARIANTS).map(([key,item])=>`<button class="quick-item" data-variant-mode="${key}"><b>${item.icon}</b><span><strong>${item.title}</strong><small>${item.desc}</small></span></button>`).join('')}</div>
+      <div class="quick-grid coach-grid">${Object.entries(WORKOUT_VARIANTS).map(([key,item])=>`<button class="quick-item" data-variant-mode="${key}"><b>${uiIcon(item.icon)}</b><span><strong>${item.title}</strong><small>${item.desc}</small></span></button>`).join('')}</div>
     </div>`;
   }else{
     const info=workoutVariantInfo(mode);
     const preview=w ? workoutExercisesForToday(w, {...p, activeWorkoutVariant:{mode, dateKey:dateKey(), workoutId:w.id}}) : [];
-    layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Versão do treino</p><h2>${info.icon} ${esc(info.title)}</h2><p class="muted">${esc(info.desc)} Vale só para o treino de hoje.</p></div><button class="close" data-close>×</button></div>
+    layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Versão do treino</p><h2>${esc(info.title)}</h2><p class="muted">${esc(info.desc)} Vale só para o treino de hoje.</p></div><button class="close" data-close>×</button></div>
       <div class="variant-preview">${preview.map((e,i)=>`<div class="history-row"><div><strong>${i+1}. ${esc(e.name)}</strong><span>${e.originalName&&e.originalName!==e.name?'original: '+esc(e.originalName)+' • ':''}meta ${esc(e.target||'')}</span></div><span class="badge orange">${esc(exerciseKind(e))}</span></div>`).join('') || '<div class="empty">Nenhum exercício para preview.</div>'}</div>
       <div class="quick-rules"><h3>Regras</h3>${variantRules(mode).map(x=>`<p>• ${esc(x)}</p>`).join('')}</div>
       <div class="actions"><button class="btn" data-apply-variant="${mode}" ${w?'':'disabled'}>Usar essa versão hoje</button><button class="btn secondary" data-variant-back>Voltar</button><button class="btn secondary" data-close>Fechar</button></div>
@@ -915,7 +922,7 @@ function applyWorkoutVariant(mode){
   else p.activeWorkoutVariant={id:'wv_'+Date.now(), date:nowISO(), dateKey:dateKey(), workoutId:w.id, mode, title:workoutVariantInfo(mode).title, tag:workoutVariantInfo(mode).tag};
   save();
   toast(mode==='full'?'Treino completo restaurado.':'Versão aplicada só para hoje.');
-  openWorkout(w.id);
+  goRunner();
 }
 const QUICK_COACH_MODES = {
   short:{icon:'⏱️', title:'Estou sem tempo', tag:'Treino rápido', desc:'Prioriza o essencial e corta acessórios.'},
@@ -971,7 +978,7 @@ function quickCoachPlanHTML(mode, p=profile()){
   const plan=quickCoachPlan(mode,p);
   if(!plan.workout) return '<div class="empty">Gere um treino primeiro para usar o ajuste rápido.</div>';
   return `<div class="quick-coach-plan">
-    <div class="alert orange"><div>${plan.info.icon}</div><div><strong>${esc(plan.info.tag)}</strong><p>${esc(plan.info.desc)}</p></div></div>
+    <div class="alert orange"><div class="alert-ic">${uiIcon(plan.info.icon)}</div><div><strong>${esc(plan.info.tag)}</strong><p>${esc(plan.info.desc)}</p></div></div>
     <div class="quick-priority"><h3>Prioridade de hoje</h3>${plan.focus.map((e,i)=>`<div class="history-row"><div><strong>${i+1}. ${esc(e.name)}</strong><span>${esc(exerciseKind(e))} • meta ${esc(e.target||'')}</span></div><span class="badge orange">${i<3?'essencial':'se der'}</span></div>`).join('')}</div>
     <div class="quick-rules"><h3>Regras do ajuste</h3>${plan.instructions.map(x=>`<p>• ${esc(x)}</p>`).join('')}<p><b>Atenção:</b> ${esc(plan.caution)}</p></div>
   </div>`;
@@ -983,11 +990,11 @@ function openQuickCoachModal(mode=null){
   if(!mode){
     layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Coach rápido</p><h2>Ajustar treino de hoje</h2><p class="muted">Escolha a situação. O app adapta a estratégia sem destruir seu plano original.</p></div><button class="close" data-close>×</button></div>
       ${w?`<div class="alert"><div>🏋️</div><div><strong>Treino atual: ${esc(w.id)} — ${esc(w.name)}</strong><p>${w.exercises.length} exercícios • ${esc(w.focus||'')}</p></div></div>`:'<div class="empty">Nenhum treino ativo ainda.</div>'}
-      <div class="quick-grid coach-grid">${Object.entries(QUICK_COACH_MODES).map(([key,item])=>`<button class="quick-item" data-quick-coach-mode="${key}"><b>${item.icon}</b><span><strong>${item.title}</strong><small>${item.desc}</small></span></button>`).join('')}</div>
+      <div class="quick-grid coach-grid">${Object.entries(QUICK_COACH_MODES).map(([key,item])=>`<button class="quick-item" data-quick-coach-mode="${key}"><b>${uiIcon(item.icon)}</b><span><strong>${item.title}</strong><small>${item.desc}</small></span></button>`).join('')}</div>
     </div>`;
   }else{
     const plan=quickCoachPlan(mode,p);
-    layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Coach rápido</p><h2>${plan.info.icon} ${esc(plan.info.title)}</h2><p class="muted">Ajuste para hoje. Você pode aplicar como nota e abrir o treino.</p></div><button class="close" data-close>×</button></div>
+    layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Coach rápido</p><h2>${esc(plan.info.title)}</h2><p class="muted">Ajuste para hoje. Você pode aplicar como nota e abrir o treino.</p></div><button class="close" data-close>×</button></div>
       ${quickCoachPlanHTML(mode,p)}
       <div class="actions"><button class="btn" data-apply-quick-coach="${mode}" ${plan.workout?'':'disabled'}>Aplicar e abrir treino</button><button class="btn secondary" data-quick-coach-back>Voltar</button><button class="btn secondary" data-close>Fechar</button></div>
     </div>`;
@@ -1008,7 +1015,7 @@ function applyQuickCoach(mode){
   p.quickCoachLogs.push(adj);
   save();
   toast('Ajuste rápido aplicado ao treino de hoje.');
-  openWorkout(w.id);
+  goRunner();
 }
 function dietMeals(diet){
   if(!diet) return [];
@@ -1035,7 +1042,9 @@ function dietMeals(diet){
       title:m.meal || m.title || m.name || m.refeicao || m.mealName || `Refeição ${i+1}`,
       text:foods,
       portions:m.portions || m.porcoes || '',
-      notes:m.notes || m.observacoes || ''
+      notes:m.notes || m.observacoes || '',
+      macros:(m.macros && typeof m.macros==='object')?m.macros:null,
+      substitutions:Array.isArray(m.substitutions)?m.substitutions:(m.substitutions?[String(m.substitutions)]:[])
     };
   });
 }
@@ -1169,6 +1178,11 @@ function todayMissionHTML(p=profile()){
     <div class="card-title"><div><h3>Score inteligente</h3><p>${scoreDetails.next ? 'Próximo passo: '+esc(scoreDetails.next.hint) : 'Tudo completo por hoje.'}</p></div><button class="btn sm secondary" data-action="open-score">Ver detalhes</button></div>
     ${scoreBreakdownHTML(p)}
   </section>`;
+}
+const RANK_GLYPHS = ["<path d=\"M12 3c3.5 0 6.5 5.2 6.5 9.6a6.5 6.5 0 0 1-13 0C5.5 8.2 8.5 3 12 3z\"/><path d=\"M8.6 15.6a3.6 3.6 0 0 0 2.2 2.4\"/>", "<circle cx=\"12\" cy=\"13.5\" r=\"7\"/><path d=\"M5.7 12.6L3 13.7l2.8 1.1\"/><circle cx=\"9.8\" cy=\"12\" r=\".7\" fill=\"currentColor\" stroke=\"none\"/><path d=\"M12 6.5c-.5-1.4.1-2.5 1.2-3M12 6.5c.7-1.2 1.8-1.6 3-1.2\"/><path d=\"M10 20.5v1.7M14 20.5v1.7\"/>", "<circle cx=\"13\" cy=\"13.2\" r=\"6.2\"/><path d=\"M9.9 8.4C9.3 6.4 10.2 4.8 11.7 4.8c1 0 1.4.7 1.6 1.5.3-.9 1-1.7 2.1-1.7 1.5 0 2 1.7 1.4 3.6\"/><path d=\"M6.9 12.3L3.2 13.5l3.7 1.4\"/><circle cx=\"11.2\" cy=\"11.8\" r=\".75\" fill=\"currentColor\" stroke=\"none\"/><path d=\"M7.9 15.8c-.8 1.5-.3 3 1 3.2 1 .1 1.7-.8 1.5-2\"/>", "<path d=\"M6.5 7v10M17.5 7v10M3.5 9.5v5M20.5 9.5v5M6.5 12h11\"/>", "<rect x=\"3.5\" y=\"14.5\" width=\"8\" height=\"5\" rx=\"1.2\"/><rect x=\"12.5\" y=\"14.5\" width=\"8\" height=\"5\" rx=\"1.2\"/><rect x=\"8\" y=\"8\" width=\"8\" height=\"5\" rx=\"1.2\"/>", "<rect x=\"5.5\" y=\"4.5\" width=\"13\" height=\"16\" rx=\"2.5\"/><path d=\"M9.5 4.5V3.5h5v1\"/><path d=\"M9 12.2l2.2 2.2 3.8-4.2M9 17.5h6\"/>", "<path d=\"M7.2 8.6A3.3 3.3 0 1 1 9.9 7.3\"/><path d=\"M16.8 8.6A3.3 3.3 0 1 0 14.1 7.3\"/><path d=\"M6 12.5c0-3.4 2.7-5.3 6-5.3s6 1.9 6 5.3c0 3.5-2.4 6.6-6 8.3-3.6-1.7-6-4.8-6-8.3z\"/><circle cx=\"9.6\" cy=\"12.6\" r=\".75\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"14.4\" cy=\"12.6\" r=\".75\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"12\" cy=\"17.6\" r=\"1\" fill=\"currentColor\" stroke=\"none\"/><path d=\"M3.4 14.6l3 .6M3.8 17.6l2.7-1.1M20.6 14.6l-3 .6M20.2 17.6l-2.7-1.1\"/>", "<circle cx=\"12\" cy=\"15\" r=\"6.5\"/><path d=\"M8.8 9.5C7.7 8.3 7.6 6.6 8.5 5.5 9.2 4.6 10.5 4 12 4s2.8.6 3.5 1.5c.9 1.1.8 2.8-.3 4\"/><path d=\"M9.2 15.5h5.6\"/>", "<path d=\"M12 2.5c.6 3.4 5.5 5.6 5.5 11.5a5.5 5.5 0 0 1-11 0c0-2 .9-3.4 2-4.5.2 1.6 1 2.5 1.8 2.8C9.2 8.4 10.6 5.2 12 2.5z\"/><path d=\"M12 18.6a2.4 2.4 0 0 1-2.4-2.4c0-1.3.9-2.1 2.4-3.4 1.5 1.3 2.4 2.1 2.4 3.4a2.4 2.4 0 0 1-2.4 2.4z\"/>", "<path d=\"M12 3l7 2.6v5.6c0 4.4-2.9 7.6-7 9.8-4.1-2.2-7-5.4-7-9.8V5.6z\"/><path d=\"M9 12l2.2 2.2L15.2 10\"/>", "<path d=\"M3.5 9.5L12 4l8.5 5.5z\"/><path d=\"M7.5 11.8V17M12 11.8V17M16.5 11.8V17\"/><path d=\"M5 20h14M6 17.5h12\"/>", "<path d=\"M5.5 11c0-4.2 2.9-7 6.5-7s6.5 2.8 6.5 7v3c0 3.5-2.6 6-6.5 6S5.5 17.5 5.5 14z\"/><path d=\"M7.5 10.3c1.4-.8 2.8-1 4.5-1s3.1.2 4.5 1\"/><circle cx=\"9.6\" cy=\"12.2\" r=\".7\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"14.4\" cy=\"12.2\" r=\".7\" fill=\"currentColor\" stroke=\"none\"/><path d=\"M8.6 16.2c0-1.5 1.4-2.4 3.4-2.4s3.4.9 3.4 2.4-1.4 2.6-3.4 2.6-3.4-1.1-3.4-2.6z\"/><path d=\"M10.9 15.8h.01M13.1 15.8h.01\"/><path d=\"M5.6 11.6c-1.6 0-2.4 1.2-2.2 2.6.2 1.2 1 1.8 2.1 1.8M18.4 11.6c1.6 0 2.4 1.2 2.2 2.6-.2 1.2-1 1.8-2.1 1.8\"/>", "<path d=\"M6 18L18.5 5.5M5.5 14.5l4 4M6 18l-2.2 2.2\"/><path d=\"M18 18L5.5 5.5M18.5 14.5l-4 4M18 18l2.2 2.2\"/>", "<path d=\"M4 17.5L3 8l5 4 4-6 4 6 5-4-1 9.5z\"/><path d=\"M5 20.5h14\"/>", "<path d=\"M7.2 7.4C7.5 4.6 9.5 2.4 12 2.4s4.5 2.2 4.8 5\"/><path d=\"M5.5 11.5a6.5 6.5 0 0 1 13 0V19.5l-3.2-2v-2.8l-1.6-1.6h-3.4l-1.6 1.6v2.8l-3.2 2z\"/><path d=\"M8.7 10.4h6.6M12 10.4v2.7\"/>"];
+function rankIconHTML(rank, mode='', size=''){
+  const idx=Math.max(0,RANKS.indexOf(rank));
+  return `<span class="rk ${mode} ${size}" aria-hidden="true"><svg viewBox="0 0 24 24">${RANK_GLYPHS[idx]}</svg></span>`;
 }
 const RANKS = [
   {from:1,to:2,name:'Frango Recém-Matriculado',icon:'🐣',desc:'Começou agora, mas já saiu da promessa.'},
@@ -1382,7 +1396,7 @@ async function loadXpFromCloud(opts={}){
 
 function levelHeaderHTML(p=profile()){
   const info=levelFromXp(ensureGamification(p).xp);
-  return `<div class="level-card-mini"><div class="level-card-row"><div class="level-badge">${esc(info.rank.icon)}</div><div><strong>${esc(info.rank.name)}</strong><span>Nv. ${info.roman} • faltam ${info.toNext} XP</span></div></div><div class="xp-bar"><i style="width:${info.pct}%"></i></div></div>`;
+  return `<div class="card compact-card level-card-mini"><div class="level-card-row">${rankIconHTML(info.rank,'cur','s44')}<div><strong>${esc(info.rank.name)}</strong><span>Nv. ${info.roman} • faltam ${info.toNext} XP</span></div></div><div class="xp-bar"><i style="width:${info.pct}%"></i></div></div>`;
 }
 function updateLevelHeader(){
   const btn=byId('openLevelModal');
@@ -1396,7 +1410,7 @@ function updateLevelHeader(){
   const icon=btn.querySelector('.level-icon');
   const name=byId('activeRankName');
   const lvl=byId('activeLevelText');
-  if(icon) icon.textContent=info.rank.icon;
+  
   if(name) name.textContent=info.rank.name;
   if(lvl) lvl.textContent=`Nv. ${info.roman}`;
 }
@@ -1410,7 +1424,7 @@ function openLevelModal(){
     const current=info.level>=r.from && info.level<=r.to;
     const range=r.from===r.to ? roman(r.from) : `${roman(r.from)}–${roman(r.to)}`;
     return `<div class="rank-row ${current?'current':''} ${unlocked?'unlocked':'locked'}">
-      <div class="rank-icon">${esc(r.icon)}</div>
+      ${rankIconHTML(r,current?'cur':unlocked?'':'lock','s44')}
       <div><strong>${range} • ${esc(r.name)}</strong><span>${esc(r.desc)}</span></div>
       <span class="badge ${current?'orange':unlocked?'green':''}">${current?'Atual':unlocked?'Liberado':'Bloqueado'}</span>
     </div>`;
@@ -1418,7 +1432,7 @@ function openLevelModal(){
   const layer=byId('modalLayer');
   layer.innerHTML=`<div class="modal level-modal"><div class="modal-head"><div><p class="eyebrow">Trilha Gym Bronze</p><h2>${esc(info.rank.name)}</h2><p class="muted">Nível ${info.roman} (${info.level}) • ${info.xp} XP acumulados</p></div><button class="close" data-close>×</button></div>
     <section class="level-hero-card">
-      <div class="level-big-icon">${esc(info.rank.icon)}</div>
+      ${rankIconHTML(info.rank,'cur','s84')}
       <div class="level-hero-copy"><h3>Nv. ${info.roman} — ${esc(info.rank.name)}</h3><p>${esc(info.rank.desc)}</p><div class="xp-bar big"><i style="width:${info.pct}%"></i></div><small>${info.level>=100?'Você chegou ao topo.':'Faltam '+info.toNext+' XP para o nível '+roman(info.level+1)+' ('+(info.level+1)+').'}</small></div>
     </section>
     ${nextRank?`<section class="card compact-card"><div class="card-title"><h3>Próxima patente</h3><p>${roman(nextRank.from)} • ${esc(nextRank.name)} — desbloqueia no nível ${nextRank.from}</p></div></section>`:''}
@@ -1451,14 +1465,14 @@ function openRankUpModal(xpInfo){
     <div class="rank-confetti" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
     <div class="rank-up-hero">
       <p class="eyebrow">Nova patente desbloqueada</p>
-      <div class="rank-up-icon">${esc(after.rank.icon)}</div>
+      ${rankIconHTML(after.rank,'cur','s96')}
       <h2>${esc(after.rank.name)}</h2>
       <p>${esc(after.rank.desc)}</p>
     </div>
     <div class="rank-up-change">
-      <span>${esc(before.rank.icon)} ${esc(before.rank.name)}</span>
+      <span>${rankIconHTML(before.rank,'','s28')} ${esc(before.rank.name)}</span>
       <b>→</b>
-      <span>${esc(after.rank.icon)} ${esc(after.rank.name)}</span>
+      <span>${rankIconHTML(after.rank,'cur','s28')} ${esc(after.rank.name)}</span>
     </div>
     <div class="rank-up-stats">
       <div><strong>+${xpInfo.total}</strong><span>XP no treino</span></div>
@@ -1656,6 +1670,8 @@ function init(){
   const quickBtn=byId('openQuickMenu'); if(quickBtn) quickBtn.addEventListener('click', openQuickMenuModal);
   byId('openProfileSwitcher').addEventListener('click', openProfileSwitcher);
   byId('openLevelModal')?.addEventListener('click', openLevelModal);
+  wireThemeEvents();
+  wireSnapshotEvents();
   render();
 }
 // v7.7.3: guard asynchronous cloud reads against local edits and pending writes.
@@ -1710,6 +1726,212 @@ async function refreshProfileRemindersForDisplay(selectedProfileId, explicit=fal
     if(explicit) toast('Não foi possível ler os horários do Supabase: '+(e?.message||'erro desconhecido'));
   }
 }
+
+
+const UI_ICONS={
+  home:'<path d="M3 11.5L12 4l9 7.5"/><path d="M5.5 10v9.5h13V10"/>',
+  workouts:'<path d="M6.5 7v10M17.5 7v10M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/>',
+  lessons:'<rect x="4" y="5.5" width="16" height="14.5" rx="3"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
+  bolt:'<path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/>',
+  leaf:'<path d="M5 19c0-8 5-13 14-14 0 9-5 14-13 14"/><path d="M5 19c3-4 6-6.5 10-8.5"/>',
+  chart:'<path d="M4 19V5"/><path d="M4 19h16"/><path d="M7.5 15l3.5-4 3 2.5 4.5-6"/>',
+  user:'<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/>',
+  crowd:'<circle cx="9" cy="9" r="3"/><circle cx="17" cy="10" r="2.4"/><path d="M3.5 19c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M15.5 14.8c2.4-.3 4.3.9 5 3.7"/>',
+  timer:'<circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 1.5M9.5 3h5"/>',
+  tired:'<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  alert:'<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>',
+  swap:'<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
+  compass:'<circle cx="12" cy="12" r="8.5"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>',
+  check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  info:'<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
+  chevL:'<path d="M15 6l-6 6 6 6"/>',
+  chevR:'<path d="M9 6l6 6-6 6"/>',
+  skip:'<path d="M5 6l9 6-9 6zM18 6v12"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  minus:'<path d="M5 12h14"/>'
+};
+const EMOJI_ICON={'🏋️':'workouts','⚡':'bolt','🏟️':'crowd','🏠':'home','🧘':'tired','⏱️':'timer','😮‍💨':'tired','⚠️':'alert','🔁':'swap','🧭':'compass','🥗':'leaf','✅':'check','📈':'chart','👤':'user','🔥':'bolt','🟡':'alert','💪':'workouts','📊':'chart','📸':'bolt'};
+function uiIcon(key){ const k=UI_ICONS[key]?key:(EMOJI_ICON[key]||'info'); return `<svg viewBox="0 0 24 24" aria-hidden="true">${UI_ICONS[k]}</svg>`; }
+// ===== v7.8.0: tema claro/escuro =====
+const THEME_KEY='gymBronze.theme', THEME_CHOSEN_KEY='gymBronze.themeChosen';
+const ICON_SUN='<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/>', ICON_MOON='<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>';
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function currentTheme(){ return document.documentElement.getAttribute('data-theme')==='dark'?'dark':'light'; }
+function applyTheme(t){
+  t = t==='dark'?'dark':'light';
+  document.documentElement.setAttribute('data-theme',t);
+  const m=document.querySelector('meta[name=theme-color]');
+  if(m) m.setAttribute('content', t==='dark'?'#0A0A0B':'#FAF9F7');
+}
+function setTheme(t){ applyTheme(t); lsSet(THEME_KEY, currentTheme()); try{ markSnapshotDirty(); scheduleSnapshotPush(); }catch(e){} }
+function svgIcon(path){ return `<svg viewBox="0 0 24 24" aria-hidden="true">${path}</svg>`; }
+function themeGateHTML(){
+  const dark=currentTheme()==='dark';
+  return `<div class="theme-gate" id="themeGate">
+    <div class="ok-dot">${svgIcon('<path d="M5 12.5l4.5 4.5L19 7.5"/>')}</div>
+    <h2>Cadastro pronto. Como você prefere o app?</h2>
+    <p class="sub">Você pode trocar quando quiser, em Perfil › Aparência.</p>
+    <div class="tp-pill"><span class="tp-thumb ${dark?'right':''}"></span>
+      <button class="tp-btn ${dark?'':'on'}" data-theme-set="light" aria-label="Modo claro" type="button">${svgIcon(ICON_SUN)}</button>
+      <button class="tp-btn ${dark?'on':''}" data-theme-set="dark" aria-label="Modo escuro" type="button">${svgIcon(ICON_MOON)}</button></div>
+    <div class="tp-labels"><span class="${dark?'':'on'}">Claro</span><span class="${dark?'on':''}">Escuro</span></div>
+    <button class="btn" data-theme-confirm type="button">Confirmar</button></div>`;
+}
+function showThemeGate(){
+  if(byId('themeGate')) return;
+  document.body.insertAdjacentHTML('beforeend', themeGateHTML());
+}
+function refreshThemeGate(){
+  const g=byId('themeGate'); if(!g) return;
+  const dark=currentTheme()==='dark';
+  g.querySelector('.tp-thumb').classList.toggle('right',dark);
+  g.querySelectorAll('.tp-btn').forEach(b=>b.classList.toggle('on',(b.dataset.themeSet==='dark')===dark));
+  g.querySelectorAll('.tp-labels span').forEach((s,i)=>s.classList.toggle('on',(i===1)===dark));
+}
+function maybeShowThemeGate(){
+  if(shouldShowOnboarding()) return;
+  if(lsGet(THEME_CHOSEN_KEY)) return;
+  showThemeGate();
+}
+function wireThemeEvents(){
+  document.addEventListener('click',e=>{
+    const set=e.target.closest('[data-theme-set]');
+    if(set){ setTheme(set.dataset.themeSet); refreshThemeGate(); if(!byId('themeGate')) render(); return; }
+    if(e.target.closest('[data-theme-confirm]')){ lsSet(THEME_CHOSEN_KEY,'1'); setTheme(currentTheme()); const g=byId('themeGate'); if(g) g.remove(); }
+  });
+}
+function appearanceSectionHTML(){
+  const dark=currentTheme()==='dark';
+  return `<details class="profile-section"><summary><span>Aparência</span><small>${dark?'Escuro':'Claro'}</small></summary>
+    <section class="card"><div class="seg-nav"><button type="button" class="${dark?'':'on'}" data-theme-set="light">Claro</button><button type="button" class="${dark?'on':''}" data-theme-set="dark">Escuro</button></div>
+    <p class="muted theme-seg">A escolha fica salva neste aparelho.</p></section></details>`;
+}
+function workoutsSegHTML(){
+  return `<div class="seg-nav"><button type="button" class="${screen==='workouts'?'on':''}" data-screen-go="workouts">Treinos</button><button type="button" class="${screen==='lessons'?'on':''}" data-screen-go="lessons">Aulas</button></div>`;
+}
+
+// ===== v7.9.0: retrato completo do perfil na nuvem =====
+// Tudo que está no perfil (dieta, check-ins, cargas, patente, preferências, tema...) é salvo
+// automaticamente em public.user_snapshots e baixado ao entrar em outro aparelho.
+var __snapTimer=null, __snapBusy=false, __snapQueued=false, __snapApplying=false, __snapLastError='';
+function snapshotDeviceId(){ let id=lsGet('gymBronze.deviceId'); if(!id){ id='d_'+Math.random().toString(16).slice(2)+Date.now().toString(16); lsSet('gymBronze.deviceId',id); } return id; }
+function snapshotEnabled(){ return !!(supabaseClient && cloudUser?.id && !isOffline() && hasCloudAccount()); }
+function markSnapshotDirty(){
+  if(__snapApplying) return;
+  const p=state.profiles && state.profiles.find(x=>x.id===state.activeProfileId);
+  if(p && p.cloudUserId){ if(!p.cloudSync) p.cloudSync={rev:0}; p.cloudSync.dirty=true; }
+}
+function snapshotOf(p){
+  const c=JSON.parse(JSON.stringify(p));
+  delete c.cloudSync; delete c.authStorageKey;
+  if(Array.isArray(c.checkins)) c.checkins=c.checkins.map(x=>{ const y={...x}; if(y.photos){ y.photoKeys=Object.keys(y.photos).filter(k=>y.photos[k]); delete y.photos; } return y; });
+  return {v:1, profile:c, settings:{theme:currentTheme(), themeChosen:!!lsGet(THEME_CHOSEN_KEY)}};
+}
+function profileScore(p){
+  if(!p) return 0;
+  return (p.history?.length||0)*5 + Math.round((p.gamification?.xp||0)/10) + (p.checkins?.length||0)*3 + (p.dietPlan?5:0) + ((p.workouts||[]).length?2:0) + (p.progress||0) + (p.foodPrefs?.done?2:0);
+}
+function unionById(a,b){
+  const out=[], seen=new Set();
+  const key=x=>x&&typeof x==='object' ? (x.id||x.localId||x.local_id||(x.date||x.createdAt||'')+'|'+(x.workoutId||x.type||x.name||'')) : String(x);
+  [...(Array.isArray(a)?a:[]), ...(Array.isArray(b)?b:[])].forEach(x=>{ const k=key(x); if(seen.has(k)) return; seen.add(k); out.push(x); });
+  return out;
+}
+function mergeProfiles(local, remote){
+  const base = profileScore(remote)>=profileScore(local) ? remote : local;
+  const other = base===remote ? local : remote;
+  const m=JSON.parse(JSON.stringify(base));
+  ['history','checkins','bio','lessons','lessonLogs','pendingAcademy'].forEach(k=>{ m[k]=unionById(base[k],other[k]); });
+  m.history.sort((x,y)=>String(x.date||'').localeCompare(String(y.date||'')));
+  m.gamification=m.gamification||{xp:0,xpEvents:[]};
+  m.gamification.xpEvents=unionById(base.gamification?.xpEvents,other.gamification?.xpEvents);
+  m.gamification.xp=Math.max(Number(local.gamification?.xp)||0, Number(remote.gamification?.xp)||0);
+  m.progress=Math.max(Number(local.progress)||0, Number(remote.progress)||0);
+  return m;
+}
+function replaceProfileInPlace(p, next){
+  const keep={id:p.id, cloudUserId:p.cloudUserId, accountEmail:p.accountEmail, authStorageKey:p.authStorageKey, cloudSync:p.cloudSync};
+  const photos={}; (p.checkins||[]).forEach(c=>{ if(c.photos) photos[c.id]=c.photos; });
+  Object.keys(p).forEach(k=>delete p[k]);
+  Object.assign(p, next, keep);
+  if(Array.isArray(p.checkins)) p.checkins.forEach(c=>{ if(photos[c.id]) c.photos=photos[c.id]; delete c.photoKeys; });
+}
+async function pullSnapshot(opts={}){
+  if(!snapshotEnabled()) return {ok:false, reason:'disabled'};
+  const p=profile(); const sync=p.cloudSync||(p.cloudSync={rev:0});
+  const {data,error}=await supabaseClient.from('user_snapshots').select('snapshot,revision,updated_at').eq('user_id',cloudUser.id).maybeSingle();
+  if(error){ __snapLastError=error.message||'erro'; console.warn('snapshot pull falhou',error); return {ok:false, reason:'error'}; }
+  if(!data || !data.snapshot?.profile) return {ok:true, none:true};
+  if(Number(data.revision)<=Number(sync.rev||0)) return {ok:true, same:true};
+  __snapApplying=true;
+  try{
+    const remote=data.snapshot.profile;
+    const localDirty=!!sync.dirty;
+    const fresh=!(sync.rev>0);
+    let next, needPush=false;
+    if(!localDirty && !fresh){ next=remote; }
+    else { next=mergeProfiles(p, remote); needPush=true; }
+    replaceProfileInPlace(p, next);
+    p.cloudSync={rev:Number(data.revision), dirty:needPush, lastPullAt:nowISO()};
+    ensureProfile(p);
+    const st=data.snapshot.settings;
+    if(st && st.themeChosen && (st.theme==='dark'||st.theme==='light')){ applyTheme(st.theme); lsSet(THEME_KEY,st.theme); lsSet(THEME_CHOSEN_KEY,'1'); const g=byId('themeGate'); if(g) g.remove(); }
+    persistOnly();
+  } finally { __snapApplying=false; }
+  return {ok:true, applied:true};
+}
+function scheduleSnapshotPush(delay=4000){
+  if(!snapshotEnabled()) return;
+  clearTimeout(__snapTimer);
+  __snapTimer=setTimeout(()=>{ pushSnapshot().catch(()=>{}); }, delay);
+}
+async function pushSnapshot(){
+  if(!snapshotEnabled()) return {ok:false};
+  if(__snapBusy){ __snapQueued=true; return {ok:false, busy:true}; }
+  const p=profile(); const sync=p.cloudSync||(p.cloudSync={rev:0,dirty:true});
+  if(!sync.dirty && sync.rev>0) return {ok:true, clean:true};
+  __snapBusy=true; let conflictResolved=false;
+  try{
+    const snap=snapshotOf(p);
+    const nextRev=(Number(sync.rev)||0)+1;
+    const row={snapshot:snap, revision:nextRev, app_version:APP_VERSION, device_id:snapshotDeviceId(), updated_at:new Date().toISOString()};
+    let ok=false;
+    if(!sync.rev){
+      const {error}=await supabaseClient.from('user_snapshots').insert({user_id:cloudUser.id, ...row});
+      if(!error) ok=true; else if(String(error.code)!=='23505' && !/duplicate/i.test(error.message||'')) throw error;
+    } else {
+      const {data,error}=await supabaseClient.from('user_snapshots').update(row).eq('user_id',cloudUser.id).eq('revision',sync.rev).select('revision');
+      if(error) throw error; ok=!!(data && data.length);
+    }
+    if(ok){ sync.rev=nextRev; sync.dirty=false; sync.lastPushAt=nowISO(); persistOnly(); __snapLastError=''; }
+    else { const r=await pullSnapshot(); conflictResolved=!!(r&&r.ok); if(conflictResolved){ render(); } }
+  }catch(e){ __snapLastError=e?.message||'erro'; console.warn('snapshot push falhou',e); }
+  finally{ __snapBusy=false; if(__snapQueued||conflictResolved){ __snapQueued=false; scheduleSnapshotPush(1200); } }
+  return {ok:true};
+}
+async function flushSnapshotNow(){ clearTimeout(__snapTimer); try{ return await pushSnapshot(); }catch(e){ return {ok:false}; } }
+function renderIsSafeNow(){
+  const layer=byId('modalLayer'); const ae=document.activeElement;
+  return (!layer || layer.classList.contains('hidden')) && !(ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) && screen!=='workouts';
+}
+async function refreshFromSnapshot(){
+  try{
+    const r=await pullSnapshot();
+    if(r && r.applied){ if(renderIsSafeNow()) render(); else toast('Dados atualizados de outro aparelho.'); }
+  }catch(e){}
+}
+function wireSnapshotEvents(){
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') refreshFromSnapshot(); else flushSnapshotNow(); });
+  window.addEventListener('online',()=>{ flushSnapshotNow().then(refreshFromSnapshot); });
+  window.addEventListener('pagehide',()=>{ flushSnapshotNow(); });
+}
+function cloudSyncStatusHTML(){
+  if(!hasCloudAccount()) return '<p class="muted">Entre em uma conta para salvar tudo na nuvem e abrir em outro aparelho.</p>';
+  const s=profile().cloudSync||{};
+  const st=__snapLastError?'<span class="badge red">erro ao salvar</span>':(s.dirty?'<span class="badge yellow">salvando…</span>':'<span class="badge green">tudo salvo</span>');
+  return `<div class="card-title"><div><h3>Backup na nuvem</h3><p>Dieta, treinos, patente, check-ins e preferências ficam salvos na sua conta.</p></div>${st}</div>${__snapLastError?`<p class="small">${esc(__snapLastError)}</p>`:''}<div class="actions"><button class="btn sm secondary" data-action="snapshot-sync-now">Salvar agora</button><button class="btn sm secondary" data-action="snapshot-pull-now">Buscar da nuvem</button></div>`;
+}
 function setScreen(s, opts={}){
   screen=s;
   render();
@@ -1750,17 +1972,19 @@ function render(){
   byId('activeProfileName').textContent = p.name || (isLocalMode() ? 'Modo local' : 'Perfil');
   byId('profileInitial').textContent = (p.name||'?').trim().charAt(0).toUpperCase();
   updateLevelHeader();
-  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.screen===screen));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.screen===(screen==='lessons'?'workouts':screen)));
   const map = {home:renderHome, workouts:renderWorkouts, lessons:renderLessons, checkin:renderCheckin, coach:renderCoach, progress:renderProgress, profile:renderProfile};
   try{
     const view = map[screen] || renderHome;
-    byId('content').innerHTML = onlineNoticeHTML() + view() + appFooterHTML();
+    byId('content').innerHTML = (screen==='workouts'||screen==='lessons'?workoutsSegHTML():'') + onlineNoticeHTML() + view() + appFooterHTML();
   }catch(err){
     console.error('Erro ao renderizar tela', screen, err);
     byId('content').innerHTML = onlineNoticeHTML() + `<section class="card"><div class="card-title"><div><h3>Não consegui abrir esta tela</h3><p>Erro temporário ao carregar ${esc(titleFor(screen))}. Tente atualizar o app.</p></div><span class="badge red">erro</span></div><p class="muted">${esc(err && err.message ? err.message : 'erro desconhecido')}</p><div class="actions"><button class="btn" data-screen-go="home">Voltar ao início</button></div></section>` + appFooterHTML();
   }
   wireSmartHeightInputs();
   bindScreen();
+  if(screen==='workouts'){ wireWorkoutModal(); bindRunner(); }
+  maybeShowThemeGate();
 }
 
 function renderOnboarding(){
@@ -2364,6 +2588,7 @@ async function completeVerifiedAccountSession(){
   if(await finishLocalAccountUpgrade(user)){
     state.pendingEmailVerification=null;
     save();
+    scheduleSnapshotPush(1500);
     return true;
   }
   const pending = state.pendingEmailVerification || {};
@@ -2415,11 +2640,17 @@ async function completeVerifiedAccountSession(){
     ensureProfile(accountProfile);
     save();
   }
-  try{ await loadLatestPlanFromCloud(); }catch(e){ console.warn('plan load failed', e); }
-  try{ await loadLatestDietPlanFromCloud(); }catch(e){ console.warn('diet load failed', e); }
+  let snapRes=null;
+  try{ snapRes=await pullSnapshot(); }catch(e){ console.warn('snapshot load failed', e); }
+  const hasSnapshot=!!(snapRes && snapRes.ok && !snapRes.none);
+  if(!hasSnapshot){
+    try{ await loadLatestPlanFromCloud(); }catch(e){ console.warn('plan load failed', e); }
+    try{ await loadLatestDietPlanFromCloud(); }catch(e){ console.warn('diet load failed', e); }
+  }
   try{ await loadLessonsFromCloud({silent:true}); }catch(e){ console.warn('lessons load failed', e); }
   try{ await syncXpEventsToCloud({silent:true}); await loadXpFromCloud({silent:true}); }catch(e){ console.warn('xp sync/load failed', e); }
   save();
+  scheduleSnapshotPush(800);
   return true;
 }
 function validateProfileInfo(info){
@@ -2993,45 +3224,201 @@ function renderPlanActions(p){
   return `<div class="actions"><button class="btn sm secondary" data-action="generate-initial-plan">Criar treino inteligente</button><button class="btn sm ${p.progress>=workoutsPerCycle(p)?'':'secondary'}" ${p.progress>=workoutsPerCycle(p)?'':'disabled'} data-action="finish-cycle-ai">Revisar próximo ciclo</button></div>`;
 }
 function renderHome(){
-  const p = profile();
-  const hasPlan = hasWorkoutPlan(p);
-  const w = hasPlan ? currentWorkout(p) : null;
-  const cycles = currentCycleNumber(p);
-  const planSource = p.planMeta?.source || 'pending';
-  const planBadge = planSource==='ai' ? 'IA' : planSource==='default' ? 'Padrão' : 'Pendente';
-  const planBadgeClass = planSource==='ai' ? 'green' : planSource==='default' ? 'orange' : 'yellow';
+  const p=profile();
+  const hasPlan=hasWorkoutPlan(p);
+  const w=hasPlan?currentWorkout(p):null;
+  const done=workoutDoneToday(p);
+  const todayRecord=latestWorkoutToday(p);
+  const daily=dailyCheckinToday(p);
+  const nutri=nutritionStats(p);
+  const meal=nextDietMeal(p);
+  const sd=dailyScoreDetails(p);
+  const info=levelFromXp(ensureGamification(p).xp);
+  const weekDone=workoutsThisWeek(p), weekTarget=clampTrainingDays(p.daysPerWeek);
+  const nutriDone=!!(nutri.total&&nutri.done===nutri.total);
+  const wLabel=w?(String(w.name).trim().toUpperCase().startsWith(String(w.id).toUpperCase())?w.name:`${w.id} — ${w.name}`):'';
+  const items=[done,!!daily,nutriDone];
+  const doneCount=items.filter(Boolean).length;
+  const first=(p.name||'').trim().split(/\s+/)[0];
+  const dateTxt=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'});
+  const chev='<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+  const row=(icon,title,sub,val,isDone,action,todo)=>`<button type="button" class="day-row ${isDone?'done':''}" data-action="${action}"><span class="tile">${svgIcon(isDone?'<path d="M5 12.5l4.5 4.5L19 7.5"/>':icon)}</span><span class="copy"><b>${title}</b><small>${sub}</small></span><span class="val ${todo?'todo':''}">${val}</span>${chev}</button>`;
+  const hero = hasPlan ? `<section class="card hero-card">
+      <p class="eyebrow">${done?'Treino concluído':'Treino de hoje'}</p>
+      <h2>${esc(wLabel)}</h2>
+      <p class="hero-meta">${done?`Finalizado às ${esc(fmtTime(todayRecord?.finishedAt||todayRecord?.date))}. Bom trabalho.`:`${w.exercises.length} exercícios • ${esc(w.focus||'')}`}</p>
+      <div class="hero-actions">${done?'<button class="btn" data-action="start-next-today">Treinar o próximo</button><button class="btn secondary" data-screen-go="progress">Ver evolução</button>':`<button class="btn" data-action="start-current">Iniciar ${esc(w.id)}</button>`}${done?'':'<button class="btn secondary" data-action="today-workout-center">Ajustar hoje</button>'}</div>
+    </section>` : `<section class="card hero-card"><p class="eyebrow">Comece aqui</p><h2>Monte seu treino</h2><p class="hero-meta">Gere um treino específico ou use o treino padrão.</p><div class="hero-actions">${renderPlanActions(p).replace('class="actions"','class="hero-actions" style="margin-top:0"')}</div></section>`;
   return `
-    ${todayMissionHTML(p)}
-    ${levelHeaderHTML(p)}
+    <section class="home-greet"><div class="date">${esc(dateTxt)}</div><h2>Olá${first?', '+esc(first):''}</h2>
+      <div class="rank-line">${rankIconHTML(info.rank,'cur','s28')}<button type="button" data-action="open-levels">${esc(info.rank.name)} · Nv. ${info.roman}</button></div></section>
+    ${hero}
+    <section class="card day-card">
+      <div class="day-head"><h3>Seu dia</h3><button type="button" data-action="open-score"><b>${doneCount}/3</b> · score ${sd.score}</button></div>
+      <div class="day-bar"><i style="width:${Math.round(doneCount/3*100)}%"></i></div>
+      ${row('<path d="M6.5 7v10M17.5 7v10M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/>','Treino',hasPlan?esc(done?(todayRecord?.workoutName||'Finalizado'):wLabel):'Sem plano ativo',done?'Feito':`${weekDone}/${weekTarget} na semana`,done,hasPlan?'start-current':'generate-initial-plan',!done)}
+      ${row('<path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/>','Check-in',daily?esc(readinessLabel(daily)+' • '+daily.readinessScore+'%'):'sono, energia e dor',daily?'Feito':'Fazer',!!daily,'daily-checkin',!daily)}
+      ${row('<path d="M5 19c0-8 5-13 14-14 0 9-5 14-13 14"/><path d="M5 19c3-4 6-6.5 10-8.5"/>','Nutri',nutri.total?`${nutri.done}/${nutri.total} refeições`:(meal?esc((meal.time?meal.time+' • ':'')+meal.title):(p.dietPlan?'rotina salva':'sem rotina ainda')),nutriDone?'Feito':(nutri.total?`${nutri.pct}%`:'Abrir'),nutriDone,'nutrition-checklist',!nutriDone)}
+    </section>
+    ${hasPlan?`<section class="card"><div class="card-title"><div><h3>Seus treinos</h3><p>Toque para ver ou editar. O próximo é o que vale hoje.</p></div></div><div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div></section>`:''}
     ${nextCommitmentHTML(p)}
     ${lessonTodayHTML(p)}
-    <section class="card plan-card compact-plan">
-      <div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title || 'Aguardando treino inteligente')} • ${esc(p.programLabel || programLabelForProfile(p))} • Ciclo ${p.planMeta?.cycle || Math.max(1, cycles+1)}</p></div><span class="badge ${planBadgeClass}">${planBadge}</span></div>
-      <p class="muted">${esc(p.planMeta?.notes || (hasPlan ? 'Use os dados dos treinos para ajustar o próximo ciclo.' : 'Nenhum treino foi carregado ainda. Gere um treino específico com IA ou use o treino padrão.'))}</p>
-      ${renderPlanActions(p)}
-    </section>
-    ${hasPlan ? `<section class="card">
-      <div class="card-title"><h3>Próximo treino</h3><span class="badge orange">${w.id}</span></div>
-      <div class="workout-card current" data-open-workout="${w.id}">
-        <div class="workout-left"><div class="letter">${w.id}</div><div class="workout-name"><strong>${esc(w.name)}</strong><span>${w.exercises.length} exercícios • ${esc(w.focus)}</span></div></div>
-        <span>›</span>
-      </div>
-    </section>` : `<section class="card"><div class="empty"><strong>Nenhum treino ativo ainda.</strong><br>O Gym Bronze vai tentar criar um treino específico com IA. Se der erro, você ainda pode usar o treino padrão para começar.</div></section>`}
-    <section class="grid three">
-      <div class="stat"><strong>${cycles}</strong><span>ciclos completos</span></div>
-      <div class="stat"><strong>${p.history.length}</strong><span>treinos no histórico</span></div>
-      <div class="stat"><strong>${p.checkins.length}</strong><span>check-ins salvos</span></div>
-    </section>
-    ${hasPlan ? `<section class="card">
-      <div class="card-title"><h3>Fila atual</h3><p>Somente o primeiro treino da fila pode ser concluído</p></div>
-      <div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div>
-    </section>` : ''}
-    ${p.history.length ? `<section class="card"><div class="card-title"><h3>Último treino</h3></div>${historyRowHTML(p.history[p.history.length-1])}</section>` : ''}
+    ${hasPlan?homePlanCardHTML(p):''}
+    ${p.history.length?`<section class="card"><div class="card-title"><h3>Último treino</h3></div>${historyRowHTML(p.history[p.history.length-1])}</section>`:''}
   `;
 }
 function pendingHTML(p){ return ''; }
-function workoutQueueCard(p,id,current=false){ const w=workoutById(p,id); if(!w) return ''; return `<div class="workout-card ${current?'current':''}" data-open-workout="${id}"><div class="workout-left"><div class="letter">${id}</div><div class="workout-name"><strong>${esc(w.name)}</strong><span>${current?'Liberado para concluir':'Modo consulta'} • ${w.exercises.length} exercícios</span></div></div><span class="badge ${current?'orange':''}">${current?'Atual':'Bloqueado'}</span></div>`; }
-function renderWorkouts(){ const p=profile(); if(!hasWorkoutPlan(p)) return `<section class="card"><div class="card-title"><div><h3>Nenhum treino ativo</h3><p>Gere um treino específico ou use o treino padrão para começar.</p></div></div><div class="actions"><button class="btn" data-action="generate-initial-plan">Gerar treino específico</button><button class="btn secondary" data-action="use-default-plan">Usar treino padrão</button></div></section>`; return `<section class="card"><div class="card-title"><div><h3>Treinos</h3><p>Você pode abrir todos, mas só conclui o treino da ordem.</p></div><div class="actions inline-actions"><button class="btn sm" data-action="today-workout-center">Treino de hoje</button><button class="btn sm secondary" data-action="edit-current-workout">Editar fixo</button></div></div><div class="grid">${p.queue.map((id,i)=>workoutQueueCard(p,id,i===0)).join('')}</div></section><section class="card pro-tip"><div><span class="badge orange">PRO</span><h3>Editor liberado</h3><p>Agora você pode editar exercícios, ordem, nome, tipo e meta de reps direto no app.</p></div></section>`; }
+function workoutQueueCard(p,id,current=false){ const w=workoutById(p,id); if(!w) return ''; const nm=String(w.name).trim().toUpperCase().startsWith(String(id).toUpperCase())?w.name.replace(/^\s*\w+\s*[-–—:]\s*/,''):w.name; return `<div class="workout-card ${current?'current':''}" data-open-workout="${id}"><div class="workout-left"><div class="letter">${esc(id)}</div><div class="workout-name"><strong>${esc(nm)}</strong><span>${w.exercises.length} exercícios${w.focus?' • '+esc(w.focus):''}</span></div></div><span class="badge ${current?'orange':''}">${current?'Próximo':'Na fila'}</span></div>`; }
+function homePlanCardHTML(p){
+  const cycles=currentCycleNumber(p); const planSource=p.planMeta?.source||'pending';
+  const planBadge=planSource==='ai'?'IA':planSource==='default'?'Padrão':'Pendente';
+  const planBadgeClass=planSource==='ai'?'green':planSource==='default'?'orange':'yellow';
+  return `<section class="card plan-card compact-plan"><div class="card-title"><div><h3>Plano atual</h3><p>${esc(p.planMeta?.title||'Treino')} • ${esc(p.programLabel||programLabelForProfile(p))} • Ciclo ${p.planMeta?.cycle||Math.max(1,cycles+1)}</p></div><span class="badge ${planBadgeClass}">${planBadge}</span></div>${renderPlanActions(p)}</section>`;
+}
+
+
+// ===== v7.8.0: execução do treino (Treinos) =====
+let runnerIdx=null, runnerKey='';
+function todayWorkoutCount(p=profile()){ const t=dateKey(); return (p.history||[]).filter(h=>dateKey(h.date||0)===t).length; }
+function runnerUnlocked(p=profile()){
+  const c=todayWorkoutCount(p); if(c===0) return true;
+  return !!(p.extraTraining && p.extraTraining.key===dateKey() && p.extraTraining.count===c);
+}
+function unlockNextToday(){ const p=profile(); p.extraTraining={key:dateKey(), count:todayWorkoutCount(p)}; runnerIdx=null; save(); }
+function goRunner(){ const p=profile(); if(!runnerUnlocked(p)) unlockNextToday(); setScreen('workouts'); }
+function setRunnerIdx(i){ runnerIdx=i; render(); window.scrollTo(0,0); }
+function markExercise(p,id,done){
+  if(!p.tempTimes) p.tempTimes={};
+  p.tempDone[id]=!!done;
+  if(done){ p.tempStatus[id]='done'; p.tempTimes[id]={...(p.tempTimes[id]||{}), status:'done', completedAt:nowISO()}; }
+  else { delete p.tempStatus[id]; delete p.tempTimes[id]; }
+}
+function runnerSets(p,e){
+  const m=p.exerciseMeta[e.id]||{};
+  const reps=repsArrayFromMeta(e,m).map(v=>{const n=parseInt(v,10);return Number.isFinite(n)?n:0;});
+  const done=reps.map((_,i)=>!!(m.setsDone||[])[i]);
+  return {reps,done};
+}
+function saveSets(p,e,reps,done){
+  const m=meta(e.id);
+  m.repsPerSet=reps; m.setsDone=done; m.reps=reps.join('/'); m.sets=reps.length;
+  m.repsDoneAvg=reps.length?Math.round(reps.reduce((a,b)=>a+b,0)/reps.length):'';
+  if(done.length && done.every(Boolean)) markExercise(p,e.id,true);
+  else if(p.tempDone[e.id] || p.tempStatus[e.id]==='skipped') markExercise(p,e.id,false);
+  save();
+}
+function runnerExercise(id){ const p=profile(); const w=currentWorkout(p); return workoutExercisesForToday(w,p).find(x=>x.id===id); }
+function runnerCardHTML(p,w,e,idx,total){
+  const kind=exerciseKind(e);
+  const doneNow=!!p.tempDone[e.id], status=p.tempStatus[e.id];
+  const m=p.exerciseMeta[e.id]||{};
+  const sub=tempSubstitutionFor(p,e);
+  const goal=currentExerciseGoal(p,effectiveExercise(p,e));
+  let body='';
+  if(kind==='strength'){
+    const selected=chosenVariant(p,e), options=exerciseVariants(e);
+    const selKey=e.id+':'+(m.selectedVariationId||'');
+    const weight=(options.length?p.variationWeights?.[selKey]:p.weights[e.id])||'';
+    const last=!selected?latestExerciseLoad(p,e):null;
+    const {reps,done}=runnerSets(p,e);
+    const picker=options.length?`<div class="segmented compact-segmented run-variants">${options.map(v=>`<button type="button" class="seg-btn ${selected?.id===v.id?'active':''}" data-ex-variation="${esc(v.id)}" data-ex-id="${esc(e.id)}">${esc(v.name)}</button>`).join('')}</div>`:'';
+    body=`${picker}
+      <div class="run-load"><label>Carga</label><input class="input" data-weight="${esc(e.id)}" value="${esc(weight)}" placeholder="${last?esc(last.weight):'ex: 40 kg'}" inputmode="decimal"></div>
+      <div class="run-sets">${reps.map((r,i)=>`<div class="run-set ${done[i]?'on':''}"><span class="n">Série ${i+1}</span>
+        <span class="stp"><button type="button" data-set-step="-1" data-set-ex="${esc(e.id)}" data-set-i="${i}" aria-label="Menos uma repetição">${uiIcon('minus')}</button><b>${r}</b><button type="button" data-set-step="1" data-set-ex="${esc(e.id)}" data-set-i="${i}" aria-label="Mais uma repetição">${uiIcon('plus')}</button><i>reps</i></span>
+        <button type="button" class="chk ${done[i]?'on':''}" data-set-toggle="${esc(e.id)}" data-set-i="${i}" aria-label="Série ${i+1} feita">${uiIcon('check')}</button></div>`).join('')}</div>`;
+  } else {
+    body=`<div class="run-legacy">${exerciseHTML(p,w,e,true)}</div>
+      <button type="button" class="btn ${doneNow?'green':''} full run-done-btn" data-toggle-ex="${esc(e.id)}">${doneNow?'Concluído — desfazer':'Marcar como feito'}</button>`;
+  }
+  const info=kind==='strength'?`<button type="button" class="link-btn run-info" data-run-info="${esc(e.id)}">${uiIcon('plus')}Adicionar informações${(m.difficulty||m.pain||m.note)?' ·':''}${(m.difficulty||m.pain||m.note)?'<span class="dotmark"></span>':''}</button>`:'';
+  return `<section class="card run-card ${doneNow?'is-done':''} ${status==='skipped'?'is-skipped':''}">
+    <div class="run-top"><p class="eyebrow">${doneNow?'Concluído':status==='skipped'?'Pulado':'Exercício '+(idx+1)+' de '+total}</p></div>
+    <h2>${esc(e.name)}</h2>
+    <p class="muted run-sub">${esc(e.type||'')}${e.target?` • meta ${esc(e.target)}`:''}</p>
+    ${sub?`<p class="small run-note">Hoje no lugar de: <b>${esc(e.originalName||'exercício original')}</b></p>`:''}
+    ${goal?`<p class="suggested-goal">Meta sugerida: <b>${esc(goal.suggestion||'')}</b>${goal.source==='ia'?' <span>IA</span>':''}</p>`:''}
+    ${body}
+    ${info}
+  </section>`;
+}
+function renderWorkoutDone(p){
+  const rec=latestWorkoutToday(p);
+  const next=currentWorkout(p);
+  const mins=rec?.durationMinutes;
+  return `<section class="card done-screen">
+    <div class="done-check">${uiIcon('check')}</div>
+    <h2>Treino de hoje concluído</h2>
+    <p class="muted">${esc(rec?.workoutName||'Treino')}${mins?` • ${mins} min`:''}${rec?` • ${rec.doneCount||0} exercícios`:''}</p>
+    <div class="done-actions">${next?`<button class="btn full" data-action="start-next-today">Iniciar próximo treino · ${esc(next.id)}</button>`:''}<button class="btn secondary full" data-screen-go="progress">Ver evolução</button></div>
+    <p class="small">Amanhã a tela volta ao treino do dia automaticamente.</p>
+  </section>`;
+}
+function renderWorkouts(){
+  const p=profile();
+  if(!hasWorkoutPlan(p)) return `<section class="card"><div class="card-title"><div><h3>Nenhum treino ativo</h3><p>Gere um treino específico ou use o treino padrão para começar.</p></div></div><div class="actions"><button class="btn" data-action="generate-initial-plan">Gerar treino específico</button><button class="btn secondary" data-action="use-default-plan">Usar treino padrão</button></div></section>`;
+  if(!runnerUnlocked(p)) return renderWorkoutDone(p);
+  const w=currentWorkout(p);
+  if(!p.activeWorkoutSession || p.activeWorkoutSession.id!==w.id){ p.activeWorkoutSession={id:w.id,startAt:nowISO()}; if(!p.tempTimes)p.tempTimes={}; save(); }
+  activeModalWorkout=w.id;
+  const exs=workoutExercisesForToday(w,p);
+  const key=w.id+'|'+dateKey()+'|'+todayWorkoutCount(p);
+  if(runnerKey!==key){ runnerKey=key; runnerIdx=null; }
+  const pending=exs.findIndex(e=>!p.tempDone[e.id] && p.tempStatus[e.id]!=='skipped');
+  let idx = runnerIdx===null ? (pending<0?exs.length:pending) : Math.max(0,Math.min(exs.length,runnerIdx));
+  runnerIdx=idx;
+  const nm=String(w.name).trim().toUpperCase().startsWith(String(w.id).toUpperCase())?w.name:w.id+' — '+w.name;
+  const variant=currentVariant(p);
+  const dots=`<div class="run-dots">${exs.map((e,i)=>`<button type="button" class="dot ${p.tempDone[e.id]?'done':p.tempStatus[e.id]==='skipped'?'skip':''} ${i===idx?'cur':''}" data-run-go="${i}" aria-label="Exercício ${i+1}"></button>`).join('')}</div>`;
+  const head=`<div class="run-head"><div><p class="eyebrow">${esc(nm)}</p>${variant?`<span class="badge orange">${esc(variant.tag||'Versão de hoje')}</span>`:''}</div><button type="button" class="link-btn" data-open-today-center>Ajustar</button></div>${dots}`;
+  if(idx>=exs.length){
+    const d=exs.filter(e=>p.tempDone[e.id]).length, s=exs.filter(e=>p.tempStatus[e.id]==='skipped').length, left=exs.length-d-s;
+    return head+`<section class="card done-screen run-finish"><div class="done-check">${uiIcon('check')}</div><h2>${left?'Quase lá':'Tudo certo'}</h2><p class="muted">${d} feitos • ${s} pulados${left?` • ${left} pendentes`:''}</p><div class="done-actions"><button class="btn full" data-finalize-workout="${esc(w.id)}">Finalizar treino</button><button class="btn secondary full" data-run-go="${Math.max(0,exs.length-1)}">Voltar aos exercícios</button></div></section>`;
+  }
+  const e=exs[idx];
+  const doneNow=!!p.tempDone[e.id];
+  const nav=`<div class="run-actions">
+    <div class="run-row"><button type="button" class="btn secondary sm" data-sub-ex="${esc(e.id)}">${tempSubstitutionFor(p,e)?'Trocar de novo':'Máquina ocupada'}</button><button type="button" class="btn secondary sm" data-skip-ex="${esc(e.id)}">Pular exercício</button></div>
+    <div class="run-nav"><button type="button" class="arrow" data-run-go="${idx-1}" ${idx===0?'disabled':''} aria-label="Exercício anterior">${uiIcon('chevL')}</button><span class="small">${idx+1} / ${exs.length}</span><button type="button" class="arrow ${doneNow?'hot':''}" data-run-go="${idx+1}" aria-label="Próximo exercício">${uiIcon('chevR')}</button></div></div>`;
+  return head+runnerCardHTML(p,w,e,idx,exs.length)+nav;
+}
+function openExerciseInfoModal(id){
+  const p=profile(); const e=runnerExercise(id); if(!e) return;
+  const m=p.exerciseMeta[id]||{};
+  const chips=(field,list)=>`<div class="segmented compact-segmented">${list.map(x=>`<button type="button" class="seg-btn ${m[field]===x?'active':''}" data-info-field="${field}" data-info-val="${esc(x)}">${x}</button>`).join('')}</div>`;
+  const layer=byId('modalLayer');
+  layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Opcional</p><h2>Informações</h2><p class="muted">${esc(e.name)}</p></div><button class="close" data-close>×</button></div>
+    <div class="field"><label>Dificuldade</label>${chips('difficulty',['Fácil','Boa','Pesada','Muito pesada'])}</div>
+    <div class="field" style="margin-top:14px"><label>Dor ou desconforto</label>${chips('pain',['Não','Leve','Média','Forte'])}</div>
+    <div class="field" style="margin-top:14px"><label>Observação</label><input class="input" id="infoNote" value="${esc(m.note||'')}" placeholder="ex: cansei muito, ajustar ritmo..."></div>
+    <div class="actions"><button class="btn full" data-close>Salvar</button></div></div>`;
+  layer.classList.remove('hidden');
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
+  document.querySelectorAll('[data-info-field]').forEach(b=>b.onclick=()=>{
+    const f=b.dataset.infoField, v=b.dataset.infoVal; const mm=meta(id);
+    mm[f]=(mm[f]===v)?'':v; save();
+    document.querySelectorAll(`[data-info-field="${f}"]`).forEach(x=>x.classList.toggle('active',mm[f]===x.dataset.infoVal));
+  });
+  byId('infoNote').oninput=()=>{ meta(id).note=byId('infoNote').value; save(); };
+}
+function bindRunner(){
+  document.querySelectorAll('[data-run-go]').forEach(b=>b.onclick=()=>{ if(b.disabled) return; setRunnerIdx(Number(b.dataset.runGo)); });
+  document.querySelectorAll('[data-run-info]').forEach(b=>b.onclick=()=>openExerciseInfoModal(b.dataset.runInfo));
+  document.querySelectorAll('[data-set-toggle]').forEach(b=>b.onclick=()=>{
+    const p=profile(); const e=runnerExercise(b.dataset.setToggle); if(!e) return;
+    const {reps,done}=runnerSets(p,e); const i=Number(b.dataset.setI); done[i]=!done[i];
+    if(p.tempStatus[e.id]==='skipped'){ delete p.tempStatus[e.id]; if(p.tempTimes) delete p.tempTimes[e.id]; }
+    saveSets(p,e,reps,done); const y=window.scrollY; render(); window.scrollTo(0,y);
+  });
+  document.querySelectorAll('[data-set-step]').forEach(b=>b.onclick=()=>{
+    const p=profile(); const e=runnerExercise(b.dataset.setEx); if(!e) return;
+    const {reps,done}=runnerSets(p,e); const i=Number(b.dataset.setI);
+    reps[i]=Math.max(0,Math.min(200,(reps[i]||0)+Number(b.dataset.setStep)));
+    saveSets(p,e,reps,done); const y=window.scrollY; render(); window.scrollTo(0,y);
+  });
+  document.querySelectorAll('[data-skip-ex]').forEach(b=>b.onclick=()=>{ const p=profile(); if(!p.tempTimes)p.tempTimes={}; const id=b.dataset.skipEx; p.tempDone[id]=false; p.tempStatus[id]='skipped'; p.tempTimes[id]={...(p.tempTimes[id]||{}),status:'skipped',skippedAt:nowISO()}; save(); setRunnerIdx((runnerIdx||0)+1); });
+  document.querySelectorAll('[data-sub-ex]').forEach(b=>b.onclick=()=>{ runnerOrigin=true; openSubstitutionModal(b.dataset.subEx); });
+}
 
 function renderProgress(){
   const p=profile(); const gains = exerciseGains(p); const cycles=currentCycleNumber(p); const levelInfo=levelFromXp(ensureGamification(p).xp);
@@ -3069,8 +3456,10 @@ function renderCheckin(){
 function renderDietPlanHTML(diet){
   if(!diet) return '<div class="empty">Nenhuma rotina alimentar gerada ainda.</div>';
   const schedule = dietMeals(diet);
-  const scheduleHTML = schedule.length ? `<div class="meal-timeline">${schedule.map(m=>`<div class="meal-item"><div class="meal-time">${esc(m.time || '')}</div><div><strong>${esc(m.title || 'Refeição')}</strong><p>${esc(m.text || '')}</p>${m.portions?`<span>${esc(m.portions)}</span>`:''}${m.notes?`<em>${esc(m.notes)}</em>`:''}</div></div>`).join('')}</div>` : '';
-  return `<div class="ai-report diet-report"><strong>${esc(diet.title||'Rotina alimentar')}</strong><p>${esc(diet.summary||'')}</p>${diet.guidelines?`<p><b>Diretrizes:</b> ${esc(Array.isArray(diet.guidelines)?diet.guidelines.join(' • '):diet.guidelines)}</p>`:''}${scheduleHTML || '<p class="muted">Rotina alimentar salva, mas sem horários estruturados detectados.</p>'}${diet.shoppingList?`<p><b>Base de compras:</b> ${esc(Array.isArray(diet.shoppingList)?diet.shoppingList.join(' • '):diet.shoppingList)}</p>`:''}${diet.attention?`<p><b>Atenção:</b> ${esc(diet.attention)}</p>`:''}</div>`;
+  const scheduleHTML = schedule.length ? `<div class="meal-timeline">${schedule.map(m=>`<div class="meal-item"><div class="meal-time">${esc(m.time || '')}</div><div><strong>${esc(m.title || 'Refeição')}</strong><p>${esc(m.text || '')}</p>${m.portions?`<span>${esc(m.portions)}</span>`:''}${m.macros?`<span class="meal-macros">${[m.macros.kcal?m.macros.kcal+' kcal':'',m.macros.p?'P '+m.macros.p+' g':'',m.macros.c?'C '+m.macros.c+' g':'',m.macros.f?'G '+m.macros.f+' g':''].filter(Boolean).join(' • ')}</span>`:''}${m.substitutions.length?`<span>Trocas: ${esc(m.substitutions.join(' • '))}</span>`:''}${m.notes?`<em>${esc(m.notes)}</em>`:''}</div></div>`).join('')}</div>` : '';
+  const tg=diet.targets;
+  const targetsHTML=(tg&&tg.calories)?`<div class="diet-targets"><div><strong>${esc(tg.calories)}</strong><span>kcal/dia</span></div><div><strong>${esc(tg.protein)} g</strong><span>proteína</span></div><div><strong>${esc(tg.carbs)} g</strong><span>carbo</span></div><div><strong>${esc(tg.fat)} g</strong><span>gordura</span></div></div><p class="small">Meta estimada (Mifflin-St Jeor) ajustada ao seu objetivo${tg.water?` • água ~${esc(tg.water)} L/dia`:''}. É uma estimativa, não prescrição.</p>`:'';
+  return `<div class="ai-report diet-report"><strong>${esc(diet.title||'Rotina alimentar')}</strong><p>${esc(diet.summary||'')}</p>${targetsHTML}${diet.guidelines?`<p><b>Diretrizes:</b> ${esc(Array.isArray(diet.guidelines)?diet.guidelines.join(' • '):diet.guidelines)}</p>`:''}${scheduleHTML || '<p class="muted">Rotina alimentar salva, mas sem horários estruturados detectados.</p>'}${diet.shoppingList?`<p><b>Base de compras:</b> ${esc(Array.isArray(diet.shoppingList)?diet.shoppingList.join(' • '):diet.shoppingList)}</p>`:''}${diet.attention?`<p><b>Atenção:</b> ${esc(diet.attention)}</p>`:''}</div>`;
 }
 function renderCoach(){
   const p=profile(); const insights=generateInsights(p); const aiOn=canUseOnlineAI(); const reports=p.history.filter(h=>h.aiReport || h.aiReportStatus || h.aiReportError).slice(-5).reverse();
@@ -3086,7 +3475,7 @@ function renderCoach(){
     ${renderNutritionChecklistHTML(p)}
     <div class="actions"><button class="btn secondary" data-action="reset-nutrition-today">Limpar hoje</button>${hasCloudAccount()?'<button class="btn secondary" data-action="save-diet-cloud">Salvar nutri na nuvem</button>':''}</div>
   </section>
-  <section class="grid">${insights.map(i=>`<div class="alert ${i.type==='orange'?'orange':''}"><div>${i.icon}</div><div><strong>${esc(i.title)}</strong><p>${esc(i.text)}</p></div></div>`).join('')}</section>
+  <section class="grid">${insights.map(i=>`<div class="alert ${i.type==='orange'?'orange':''}"><div class="alert-ic">${uiIcon(i.icon)}</div><div><strong>${esc(i.title)}</strong><p>${esc(i.text)}</p></div></div>`).join('')}</section>
   <section class="card"><div class="card-title"><h3>Últimos relatórios</h3><p>Gerados ao finalizar treino</p></div>${reports.length?reports.map(h=>aiHistoryHTML(h)).join(''):'<div class="empty">Nenhum relatório salvo ainda.</div>'}</section>`;
 }
 function generateInsights(p){
@@ -3194,12 +3583,14 @@ function renderProfile(){
   return `<section class="card profile-level-card">
     <div class="card-title">
       <div><p class="eyebrow">Warrior</p><h3>${esc(p.name || 'Meu perfil')}</h3><p>${esc(accountLabel)}</p><p>${esc(levelInfo.rank.name)} • Nv. ${levelInfo.roman} (${levelInfo.level})</p></div>
-      <div class="level-badge big">${esc(levelInfo.rank.icon)}</div>
+      ${rankIconHTML(levelInfo.rank,'cur','s56')}
     </div>
     <div class="xp-bar big"><i style="width:${levelInfo.pct}%"></i></div>
     <p class="muted">${levelInfo.level>=100?'Mr. Gym Bronze desbloqueado.':'Faltam '+levelInfo.toNext+' XP para o próximo nível.'} ${hasCloudAccount()?'XP sincronizável na nuvem.':'XP salvo neste aparelho.'}</p>
     <div class="actions"><button class="btn sm secondary" data-action="open-levels">Ver patentes</button><button class="btn sm secondary" data-action="account-switch">Alternar conta</button>${hasCloudAccount()?'<button class="btn sm secondary" data-action="sync-xp-cloud">Salvar XP na nuvem</button>':''}</div>
   </section>
+  ${appearanceSectionHTML()}
+  <details class="profile-section"><summary><span>Alimentação</span><small>${esc(foodPrefsSummary(p))}</small></summary><section class="card"><p class="muted">Restrições, preferências e rotina de cozinha usadas para montar sua dieta.</p><div class="actions"><button class="btn sm" data-action="edit-food-prefs">${foodPrefs(p).done?'Editar preferências':'Preencher agora'}</button></div></section></details>
 
   <details class="profile-section" open>
     <summary><span>Dados pessoais</span><small>nome, idade e corpo</small></summary>
@@ -3235,7 +3626,7 @@ function renderProfile(){
 
   <details class="profile-section">
     <summary><span>Conta e sincronização</span><small>nuvem, backup e troca</small></summary>
-    <section class="card"><div class="card-title"><div><h3>Conta</h3><p>Sincronize histórico, treino, nutri e XP na nuvem.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}<div class="divider"></div><div class="actions"><button class="btn secondary" data-action="account-switch">Alternar conta</button><button class="btn secondary" data-action="new-profile">Adicionar novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
+    <section class="card"><div class="card-title"><div><h3>Conta</h3><p>Sincronize histórico, treino, nutri e XP na nuvem.</p></div>${cloudStatusHTML()}</div>${renderCloudAccount(p)}<div class="divider"></div>${cloudSyncStatusHTML()}<div class="divider"></div><div class="actions"><button class="btn secondary" data-action="account-switch">Alternar conta</button><button class="btn secondary" data-action="new-profile">Adicionar novo perfil</button><button class="btn secondary" data-action="backup">Exportar backup</button><button class="btn secondary" data-action="import-backup">Importar backup</button><input id="backupInput" type="file" accept="application/json" hidden></div></section>
   </details>
 
   <details class="profile-section">
@@ -3293,7 +3684,8 @@ function bindScreen(){
   document.querySelectorAll('[data-retry-ai-report]').forEach(el=>el.onclick=()=>retryWorkoutAIReport(el.dataset.retryAiReport));
 }
 function handleAction(a){
-  if(a==='start-current'){ const w=currentWorkout(); if(!w) return toast('Gere um treino primeiro.'); openWorkout(w.id); }
+  if(a==='start-current'){ const w=currentWorkout(); if(!w) return toast('Gere um treino primeiro.'); goRunner(); }
+  if(a==='start-next-today'){ unlockNextToday(); setScreen('workouts'); }
   if(a==='new-profile') createProfileFlow();
   if(a==='save-profile') saveProfileForm();
   if(a==='refresh-reminder-times') refreshProfileRemindersForDisplay(state.activeProfileId,true);
@@ -3330,6 +3722,9 @@ function handleAction(a){
   if(a==='today-workout-center') openTodayWorkoutCenter();
   if(a==='quick-coach') openQuickCoachModal();
   if(a==='workout-variants') openWorkoutVariantModal();
+  if(a==='snapshot-sync-now'){ const p=profile(); if(p.cloudSync) p.cloudSync.dirty=true; flushSnapshotNow().then(()=>{ toast(__snapLastError?'Não consegui salvar: '+__snapLastError:'Tudo salvo na nuvem.'); render(); }); return; }
+  if(a==='snapshot-pull-now'){ pullSnapshot().then(r=>{ toast(r?.applied?'Dados atualizados da nuvem.':(r?.none?'Ainda não há dados salvos na nuvem.':'Já está atualizado.')); render(); }); return; }
+  if(a==='edit-food-prefs'){ openFoodPrefsModal(); return; }
   if(a==='open-levels') openLevelModal();
   if(a==='account-switch') openProfileSwitcher();
   if(a==='add-lesson') openLessonModal();
@@ -3688,6 +4083,8 @@ function applySubstitutionToExercise(p,e){
 function applyTemporarySubstitutions(list,p=profile()){
   return (list||[]).map(e=>applySubstitutionToExercise(p,e));
 }
+let runnerOrigin=false;
+function afterSub(id){ if(runnerOrigin){ runnerOrigin=false; closeModal(); } else openWorkout(id); }
 function openSubstitutionModal(exId){
   const p=profile();
   const w=currentWorkout(p);
@@ -3703,12 +4100,12 @@ function openSubstitutionModal(exId){
     <div class="field"><label>Ou escreva outra opção</label><input class="input" id="customSubName" placeholder="ex: supino inclinado smith"></div>
     <div class="actions"><button class="btn" data-apply-custom-sub>Usar opção escrita</button><button class="btn secondary" data-remove-sub="${esc(exId)}">Voltar ao original</button><button class="btn secondary" data-close>Cancelar</button></div></div>`;
   layer.classList.remove('hidden');
-  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>openWorkout(w.id));
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>afterSub(w.id));
   document.querySelectorAll('[data-apply-sub]').forEach(b=>b.onclick=()=>{
     const chosen=options[Number(b.dataset.applySub)];
     if(!p.tempSubstitutions) p.tempSubstitutions={};
     p.tempSubstitutions[exId]={...chosen, originalName:original.name, dateKey:dateKey(), reason:'Máquina ocupada', createdAt:nowISO()};
-    save(); openWorkout(w.id); toast('Substituição aplicada só para hoje.');
+    save(); afterSub(w.id); toast('Substituição aplicada só para hoje.');
   });
   const custom=byId('customSubName');
   document.querySelector('[data-apply-custom-sub]').onclick=()=>{
@@ -3716,10 +4113,10 @@ function openSubstitutionModal(exId){
     if(!name) return toast('Digite o nome da alternativa.');
     if(!p.tempSubstitutions) p.tempSubstitutions={};
     p.tempSubstitutions[exId]={id:'custom_'+Date.now(), name, target:original.target||'3-4 séries', type:original.type||'alternativa', originalName:original.name, dateKey:dateKey(), reason:'Máquina ocupada', createdAt:nowISO()};
-    save(); openWorkout(w.id); toast('Substituição aplicada só para hoje.');
+    save(); afterSub(w.id); toast('Substituição aplicada só para hoje.');
   };
   const rem=document.querySelector('[data-remove-sub]');
-  if(rem) rem.onclick=()=>{ if(p.tempSubstitutions) delete p.tempSubstitutions[exId]; save(); openWorkout(w.id); toast('Exercício original restaurado.'); };
+  if(rem) rem.onclick=()=>{ if(p.tempSubstitutions) delete p.tempSubstitutions[exId]; save(); afterSub(w.id); toast('Exercício original restaurado.'); };
 }
 
 // v7.7.7: exercise variants are structured by AI, or detected locally in legacy plans.
@@ -3859,7 +4256,7 @@ function openWorkout(id){
   const adj=currentAdjustment(p);
   const variant=currentVariant(p);
   const dayExercises=workoutExercisesForToday(w,p);
-  layer.innerHTML = `<div class="modal"><div class="modal-head"><div><p class="eyebrow">${isCurrent?'Treino liberado':'Modo consulta'}</p><h2>${w.id} — ${esc(w.name)}</h2><p class="muted">${isCurrent?'Você pode concluir exercícios e finalizar.':'Você pode consultar cargas, mas não concluir fora da ordem.'}</p></div><button class="close" data-close>×</button></div>
+  layer.innerHTML = `<div class="modal"><div class="modal-head"><div><p class="eyebrow">${isCurrent?'Treino liberado':'Modo consulta'}</p><h2>${esc(String(w.name).trim().toUpperCase().startsWith(String(w.id).toUpperCase())?w.name:w.id+' — '+w.name)}</h2><p class="muted">${isCurrent?'Você pode concluir exercícios e finalizar.':'Você pode consultar cargas, mas não concluir fora da ordem.'}</p></div><button class="close" data-close>×</button></div>
   <div class="actions modal-actions-top"><button class="btn sm" data-open-today-center>Ajuste treino hoje</button><button class="btn sm secondary" data-edit-workout="${w.id}">Editar treino</button><button class="btn sm secondary" data-close>Fechar</button></div>
   ${variant?`<section class="card quick-active-card"><div class="card-title"><div><h3>${esc(variant.tag || 'Versão ativa')}</h3><p>${esc(variant.title || '')} • vale só hoje</p></div><span class="badge orange">Temporário</span></div><p class="muted">O treino original permanece salvo. Na próxima vez, ele volta normal.</p></section>`:''}
   ${adj?`<section class="card quick-active-card"><div class="card-title"><div><h3>${esc(adj.tag || 'Ajuste ativo')}</h3><p>${esc(adj.title || '')} • aplicado às ${fmtTime(adj.date)}</p></div><span class="badge orange">Hoje</span></div><p class="muted">${esc((adj.notes||[]).slice(0,2).join(' '))}</p></section>`:''}
@@ -3892,7 +4289,7 @@ function wireWorkoutModal(){
 function openEditWorkout(id){
   activeModalWorkout=id;
   const p=profile(); const w=workoutById(p,id); const layer=byId('modalLayer');
-  layer.innerHTML = `<div class="modal"><div class="modal-head"><div><p class="eyebrow">Editor de treino</p><h2>${w.id} — ${esc(w.name)}</h2><p class="muted">Mude nomes, ordem, tipo e meta. As cargas salvas dos exercícios antigos são mantidas.</p></div><button class="close" data-close>×</button></div>
+  layer.innerHTML = `<div class="modal"><div class="modal-head"><div><p class="eyebrow">Editor de treino</p><h2>${esc(String(w.name).trim().toUpperCase().startsWith(String(w.id).toUpperCase())?w.name:w.id+' — '+w.name)}</h2><p class="muted">Mude nomes, ordem, tipo e meta. As cargas salvas dos exercícios antigos são mantidas.</p></div><button class="close" data-close>×</button></div>
   <section class="editor-panel"><div class="form-grid"><div class="field"><label>Nome do treino</label><input class="input" id="editWorkoutName" value="${esc(w.name)}"></div><div class="field"><label>Foco</label><input class="input" id="editWorkoutFocus" value="${esc(w.focus||'')}"></div></div></section>
   <div class="edit-list">${w.exercises.map((e,i)=>editExerciseRow(e,i,w.exercises.length)).join('')}</div>
   <div class="actions"><button class="btn" data-add-exercise="${w.id}">Adicionar exercício</button><button class="btn secondary" data-back-workout="${w.id}">Voltar ao treino</button><button class="btn secondary" data-close>Fechar</button></div></div>`;
@@ -3925,7 +4322,7 @@ function wireEditWorkoutModal(id){
 function meta(id){ const p=profile(); if(!p.exerciseMeta[id]) p.exerciseMeta[id]={}; return p.exerciseMeta[id]; }
 function modalScrollTop(){ const m=document.querySelector('#modalLayer .modal'); return m ? m.scrollTop : 0; }
 function restoreModalScroll(y){ requestAnimationFrame(()=>{ const m=document.querySelector('#modalLayer .modal'); if(m) m.scrollTop = y || 0; }); }
-function refreshWorkoutKeepingScroll(){ const y=modalScrollTop(); openWorkout(activeModalWorkout); restoreModalScroll(y); }
+function refreshWorkoutKeepingScroll(){ const lay=byId('modalLayer'); if(lay && lay.classList.contains('hidden')){ const y=window.scrollY; render(); window.scrollTo(0,y); return; } const y=modalScrollTop(); openWorkout(activeModalWorkout); restoreModalScroll(y); }
 function toggleDone(id){
   const p=profile();
   if(!p.tempTimes) p.tempTimes={};
@@ -3977,7 +4374,7 @@ function finalizeWorkout(id){ const p=profile(); if(p.queue[0]!==id) return toas
   else if(p.ai.autoWorkoutReport && isOffline()) record.aiReportError='IA pausada: você estava offline.';
   else if(p.ai.autoWorkoutReport && !cloudUser) record.aiReportError='IA pausada: entre na conta para gerar relatório.';
   p.history.push(record);
-  p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); p.tempDone={}; p.tempStatus={}; p.tempTimes={}; p.activeWorkoutSession=null; p.activeWorkoutVariant=null; p.activeWorkoutAdjustment=null; p.tempSubstitutions={};
+  p.progress = Math.min(p.target, p.progress + 1); p.queue.push(p.queue.shift()); dayExercises.forEach(e=>{ if(p.exerciseMeta[e.id]) delete p.exerciseMeta[e.id].setsDone; }); runnerIdx=null; p.tempDone={}; p.tempStatus={}; p.tempTimes={}; p.activeWorkoutSession=null; p.activeWorkoutVariant=null; p.activeWorkoutAdjustment=null; p.tempSubstitutions={};
   save(); closeModal(); toast(record.aiReportStatus==='pending' ? levelUpToast(xpInfo)+' Gerando relatório com IA...' : (isOffline() ? levelUpToast(xpInfo)+' Salvo offline neste aparelho.' : levelUpToast(xpInfo)));
   maybeShowRankUpModal(xpInfo);
   saveCurrentPlanToCloud('queue_after_workout').catch(()=>{});
@@ -3990,18 +4387,18 @@ function openQuickMenuModal(){
   const p=profile();
   const layer=byId('modalLayer');
   const items=[
-    ['home','🏠','Início','Missão do dia'],
-    ['workouts','🏋️','Treinos','Plano e execução'],
-    ['lessons','🧘','Aulas','Yoga, Pilates e coletivas'],
-    ['checkin','⚡','Check-in','Diário e físico'],
-    ['coach','🥗','Nutri','Rotina e checklist'],
-    ['progress','📈','Progresso','Cargas e histórico'],
-    ['profile','👤','Perfil','Conta e segurança']
+    ['home','home','Hoje','Seu dia e seus treinos'],
+    ['workouts','workouts','Treinos','Executar o treino'],
+    ['lessons','lessons','Aulas','Yoga, Pilates e coletivas'],
+    ['checkin','bolt','Check-in','Diário e físico'],
+    ['coach','leaf','Nutri','Rotina e checklist'],
+    ['progress','chart','Evolução','Cargas e histórico'],
+    ['profile','user','Perfil','Conta e aparência']
   ];
   layer.innerHTML=`<div class="modal quick-modal"><div class="modal-head"><div><p class="eyebrow">Menu rápido</p><h2>Gym Bronze</h2><p class="muted">Atalhos para as áreas principais e ações rápidas.</p></div><button class="close" data-close>×</button></div>
-    <div class="quick-grid">${items.map(([screenKey,icon,title,desc])=>`<button class="quick-item" data-quick-screen="${screenKey}"><b>${icon}</b><span><strong>${title}</strong><small>${desc}</small></span></button>`).join('')}</div>
+    <div class="quick-grid">${items.map(([screenKey,icon,title,desc])=>`<button class="quick-item" data-quick-screen="${screenKey}"><b>${uiIcon(icon)}</b><span><strong>${title}</strong><small>${desc}</small></span></button>`).join('')}</div>
     <div class="divider"></div>
-    <div class="actions"><button class="btn" data-quick-action="open-score">Score do dia</button><button class="btn secondary" data-quick-action="today-workout-center">Treino de hoje</button><button class="btn secondary" data-quick-action="daily-checkin">Check-in rápido</button><button class="btn secondary" data-quick-action="account-switch">Alternar conta</button>${p.dietPlan?'<button class="btn secondary" data-quick-action="nutrition-checklist">Checklist nutri</button>':'<button class="btn secondary" data-quick-action="generate-diet-plan">Gerar nutri</button>'}</div>
+    <div class="actions"><button class="btn secondary sm" data-quick-action="open-score">Score do dia</button><button class="btn secondary sm" data-quick-action="today-workout-center">Ajustar treino</button><button class="btn secondary sm" data-quick-action="daily-checkin">Check-in rápido</button><button class="btn secondary sm" data-quick-action="account-switch">Alternar conta</button>${p.dietPlan?'<button class="btn secondary sm" data-quick-action="nutrition-checklist">Checklist nutri</button>':'<button class="btn secondary sm" data-quick-action="generate-diet-plan">Gerar nutri</button>'}</div>
     <p class="muted">v${APP_VERSION}</p>
   </div>`;
   layer.classList.remove('hidden');
@@ -4073,7 +4470,7 @@ function openCheckinModal(){ const p=profile(), cycle=currentCycleNumber(p); con
 function inputPlain(id,label){ return `<div class="field"><label>${label}</label><input class="input" id="${id}"></div>`; }
 function compressImage(file){ return new Promise((resolve,reject)=>{ if(!file) return resolve(''); const r=new FileReader(); r.onload=()=>{ const img=new Image(); img.onload=()=>{ const max=900, scale=Math.min(1,max/img.width); const c=document.createElement('canvas'); c.width=Math.round(img.width*scale); c.height=Math.round(img.height*scale); c.getContext('2d').drawImage(img,0,0,c.width,c.height); resolve(c.toDataURL('image/jpeg',.72)); }; img.onerror=reject; img.src=r.result; }; r.onerror=reject; r.readAsDataURL(file); }); }
 
-function openBioModal(){ const p=profile(); const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Bioimpedância</p><h2>Inserir avaliação</h2><p class="muted">Você pode preencher manualmente ou tentar extrair texto de um PDF.</p></div><button class="close" data-close>×</button></div><div class="field"><label>PDF da bioimpedância opcional</label><input class="input" id="bioPdf" type="file" accept="application/pdf"></div><div class="actions"><button class="btn secondary" data-parse-pdf>Tentar ler PDF</button></div><div class="form-grid">${['date:Data','weight:Peso','height:Altura','imc:IMC','bodyFat:% gordura','fatMass:Massa gorda','leanMass:Massa magra','water:% água','visceral:Gordura visceral','metabolicAge:Idade metabólica','waist:Cintura','abdomen:Abdômen','hip:Quadril','arm:Braço','thigh:Coxa','calf:Panturrilha'].map(x=>{const [id,label]=x.split(':'); return `<div class="field"><label>${label}</label><input class="input" id="bio_${id}"></div>`}).join('')}<div class="field" style="grid-column:1/-1"><label>Observações</label><textarea id="bio_notes"></textarea></div></div><div class="actions"><button class="btn" data-save-bio>Salvar avaliação</button><button class="btn secondary" data-close>Cancelar</button></div></div>`; layer.classList.remove('hidden'); byId('bio_date').value = new Date().toISOString().slice(0,10); document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelector('[data-save-bio]').onclick=()=>{ const obj={id:'b_'+Date.now(), date:byId('bio_date').value?new Date(byId('bio_date').value).toISOString():nowISO()}; ['weight','height','imc','bodyFat','fatMass','leanMass','water','visceral','metabolicAge','waist','abdomen','hip','arm','thigh','calf'].forEach(k=>obj[k]=byId('bio_'+k)?.value || ''); obj.notes=byId('bio_notes')?.value || ''; p.bio.push(obj); save(); closeModal(); toast('Bioimpedância salva.');}; document.querySelector('[data-parse-pdf]').onclick=parseBioPdf; }
+function openBioModal(){ const p=profile(); const layer=byId('modalLayer'); layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Bioimpedância</p><h2>Inserir avaliação</h2><p class="muted">Você pode preencher manualmente ou tentar extrair texto de um PDF.</p></div><button class="close" data-close>×</button></div><div class="field"><label>PDF da bioimpedância opcional</label><input class="input" id="bioPdf" type="file" accept="application/pdf"></div><div class="actions"><button class="btn secondary" data-parse-pdf>Tentar ler PDF</button></div><div class="form-grid">${['date:Data','weight:Peso','height:Altura','imc:IMC','bodyFat:% gordura','fatMass:Massa gorda','leanMass:Massa magra','water:% água','visceral:Gordura visceral','metabolicAge:Idade metabólica','waist:Cintura','abdomen:Abdômen','hip:Quadril','arm:Braço','thigh:Coxa','calf:Panturrilha'].map(x=>{const [id,label]=x.split(':'); return `<div class="field"><label>${label}</label><input class="input" id="bio_${id}"></div>`}).join('')}<div class="field" style="grid-column:1/-1"><label>Observações</label><textarea id="bio_notes"></textarea></div></div><div class="actions"><button class="btn" data-save-bio>Salvar avaliação</button><button class="btn secondary" data-close>Cancelar</button></div></div>`; layer.classList.remove('hidden'); byId('bio_date').value = dateKey(); document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal); document.querySelector('[data-save-bio]').onclick=()=>{ const obj={id:'b_'+Date.now(), date:byId('bio_date').value?new Date(byId('bio_date').value).toISOString():nowISO()}; ['weight','height','imc','bodyFat','fatMass','leanMass','water','visceral','metabolicAge','waist','abdomen','hip','arm','thigh','calf'].forEach(k=>obj[k]=byId('bio_'+k)?.value || ''); obj.notes=byId('bio_notes')?.value || ''; p.bio.push(obj); save(); closeModal(); toast('Bioimpedância salva.');}; document.querySelector('[data-parse-pdf]').onclick=parseBioPdf; }
 async function parseBioPdf(){ const file=byId('bioPdf').files[0]; if(!file) return toast('Selecione um PDF.'); if(!window.pdfjsLib) return toast('Leitor PDF indisponível. Preencha manualmente.'); try{ pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; const buf=await file.arrayBuffer(); const pdf=await pdfjsLib.getDocument({data:buf}).promise; let text=''; for(let i=1;i<=pdf.numPages;i++){ const page=await pdf.getPage(i); const content=await page.getTextContent(); text += ' ' + content.items.map(it=>it.str).join(' '); } fillBioFromText(text); toast('PDF lido. Confira os dados antes de salvar.'); }catch(e){ toast('Não consegui ler esse PDF. Preencha manualmente.'); } }
 function fillBioFromText(t){ const get=(re)=>{const m=t.match(re); return m?m[1].replace(',', '.'):''}; const date=t.match(/Data[:\s]+(\d{2}\/\d{2}\/\d{4})/i); if(date){ const [d,m,y]=date[1].split('/'); byId('bio_date').value=`${y}-${m}-${d}`; } const map={ weight:/Peso\s+(\d+[,.]?\d*)\s*Kg/i, height:/Altura\s+(\d+[,.]?\d*)\s*m/i, imc:/IMC\s+(\d+[,.]?\d*)/i, fatMass:/Massa Gorda\s+(\d+[,.]?\d*)\s*Kg/i, bodyFat:/%\s*Massa Gorda\s+(\d+[,.]?\d*)%?/i, leanMass:/Massa Magra\s+(\d+[,.]?\d*)\s*Kg/i, water:/%\s*Água Corporal\s+(\d+[,.]?\d*)%?/i, visceral:/Gordura Visceral\s+(\d+[,.]?\d*)%?/i, metabolicAge:/Idade Metabólica\s+(\d+)/i, waist:/Cintura\s+(\d+[,.]?\d*)\s*cm/i, abdomen:/Abdômen\s+(\d+[,.]?\d*)\s*cm/i, hip:/Quadril\s+(\d+[,.]?\d*)\s*cm/i, calf:/Panturrilha direita\s+(\d+[,.]?\d*)\s*cm/i}; Object.entries(map).forEach(([k,re])=>{ const v=get(re); if(v && byId('bio_'+k)) byId('bio_'+k).value=v; }); }
 
@@ -4269,6 +4666,7 @@ async function syncCurrentDataBeforeLogout(){
   const result={profile:false, workouts:false, plan:false, diet:false, lessons:false};
   if(!hasCloudAccount()) return result;
   try{ await upsertCloudProfile(null); result.profile=true; }catch(e){ console.warn('Falha ao sincronizar perfil antes do logout:', e); }
+  try{ await flushSnapshotNow(); }catch(e){ console.warn('Falha ao salvar retrato antes do logout:', e); }
   try{ await syncLocalHistoryToCloud({silent:true}); result.workouts=true; }catch(e){ console.warn('Falha ao sincronizar histórico antes do logout:', e); }
   try{ await saveCurrentPlanToCloud('logout_sync'); result.plan=true; }catch(e){ console.warn('Falha ao sincronizar plano antes do logout:', e); }
   try{ await saveDietPlanToCloud(p.dietPlan, {silent:true}); result.diet=true; }catch(e){ console.warn('Falha ao sincronizar nutri antes do logout:', e); }
@@ -4864,10 +5262,64 @@ async function saveDietPlanToCloud(diet, opts={}){
   }
 }
 
+
+// ===== v7.9.0: perguntas alimentares =====
+const FOOD_OPTS={
+  restrictions:['Lactose','Glúten','Frutos do mar','Amendoim/oleaginosas','Ovo','Soja'],
+  diet:['Come de tudo','Vegetariano','Vegano','Sem carne vermelha','Low carb'],
+  meals:['3','4','5','6'],
+  cooking:['Cozinha todo dia','Faz marmita','Come fora','Misto'],
+  budget:['Econômico','Médio','Sem limite'],
+  breakfast:['Doce','Salgado','Tanto faz'],
+  supplements:['Whey','Creatina','Cafeína','Multivitamínico','Nenhum'],
+  health:['Gestante ou amamentando','Diabetes ou doença crônica','Histórico de transtorno alimentar','Uso de medicamento contínuo']
+};
+function foodPrefs(p=profile()){
+  if(!p.foodPrefs) p.foodPrefs={done:false,restrictions:[],dislikes:'',diet:'Come de tudo',meals:'4',cooking:'Misto',budget:'Médio',breakfast:'Tanto faz',supplements:[],health:[],notes:''};
+  return p.foodPrefs;
+}
+function foodPrefsSummary(p=profile()){
+  const f=foodPrefs(p); if(!f.done) return 'Ainda não preenchido';
+  const parts=[f.diet, f.meals+' refeições', f.restrictions.length?('sem '+f.restrictions.join(', ').toLowerCase()):''].filter(Boolean);
+  return parts.join(' • ');
+}
+function dietBlockReason(p=profile()){
+  const age=Number(String(p.age||'').replace(',','.'));
+  const f=foodPrefs(p);
+  if(Number.isFinite(age) && age>0 && age<18) return 'Por segurança, o app não monta dieta para menores de 18 anos. Procure um nutricionista.';
+  if((f.health||[]).some(h=>/transtorno|gestante/i.test(h))) return 'Pelas condições que você informou, o app não gera dieta automática. Procure um nutricionista para um plano seguro.';
+  return '';
+}
+function openFoodPrefsModal(onSave){
+  const p=profile(); const f=JSON.parse(JSON.stringify(foodPrefs(p)));
+  const multi=(field,list)=>`<div class="segmented compact-segmented">${list.map(x=>`<button type="button" class="seg-btn ${(f[field]||[]).includes(x)?'active':''}" data-fp-multi="${field}" data-fp-val="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
+  const single=(field,list)=>`<div class="segmented compact-segmented">${list.map(x=>`<button type="button" class="seg-btn ${f[field]===x?'active':''}" data-fp-single="${field}" data-fp-val="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
+  const layer=byId('modalLayer');
+  layer.innerHTML=`<div class="modal"><div class="modal-head"><div><p class="eyebrow">Alimentação</p><h2>Suas preferências</h2><p class="muted">Usamos isso para montar uma rotina que combina com você. Fica salvo na sua conta.</p></div><button class="close" data-close>×</button></div>
+    <div class="field"><label>Alergias e restrições</label>${multi('restrictions',FOOD_OPTS.restrictions)}</div>
+    <div class="field" style="margin-top:14px"><label>Tipo de dieta</label>${single('diet',FOOD_OPTS.diet)}</div>
+    <div class="field" style="margin-top:14px"><label>Refeições por dia</label>${single('meals',FOOD_OPTS.meals)}</div>
+    <div class="field" style="margin-top:14px"><label>Rotina de cozinha</label>${single('cooking',FOOD_OPTS.cooking)}</div>
+    <div class="field" style="margin-top:14px"><label>Orçamento</label>${single('budget',FOOD_OPTS.budget)}</div>
+    <div class="field" style="margin-top:14px"><label>Café da manhã</label>${single('breakfast',FOOD_OPTS.breakfast)}</div>
+    <div class="field" style="margin-top:14px"><label>Suplementos que já usa</label>${multi('supplements',FOOD_OPTS.supplements)}</div>
+    <div class="field" style="margin-top:14px"><label>Alimentos que não come ou não gosta</label><input class="input" id="fpDislikes" value="${esc(f.dislikes||'')}" placeholder="ex: fígado, beterraba, peixe..."></div>
+    <div class="field" style="margin-top:14px"><label>Algo se aplica a você?</label>${multi('health',FOOD_OPTS.health)}<p class="small">Se marcar gestação ou transtorno alimentar, o app não gera dieta automática e indica um nutricionista.</p></div>
+    <div class="actions"><button class="btn full" data-fp-save>Salvar</button></div></div>`;
+  layer.classList.remove('hidden');
+  const bind=()=>{
+    document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
+    document.querySelectorAll('[data-fp-multi]').forEach(b=>b.onclick=()=>{ const k=b.dataset.fpMulti, v=b.dataset.fpVal; const a=f[k]||(f[k]=[]); const i=a.indexOf(v); if(i>=0) a.splice(i,1); else { if(v==='Nenhum') a.length=0; else { const n=a.indexOf('Nenhum'); if(n>=0) a.splice(n,1); } a.push(v); } b.parentElement.querySelectorAll('[data-fp-multi]').forEach(x=>x.classList.toggle('active',a.includes(x.dataset.fpVal))); });
+    document.querySelectorAll('[data-fp-single]').forEach(b=>b.onclick=()=>{ f[b.dataset.fpSingle]=b.dataset.fpVal; b.parentElement.querySelectorAll('[data-fp-single]').forEach(x=>x.classList.toggle('active',x===b)); });
+    document.querySelector('[data-fp-save]').onclick=()=>{ f.dislikes=byId('fpDislikes').value.trim(); f.done=true; f.updatedAt=nowISO(); const pp=profile(); pp.foodPrefs=f; save(); layer.classList.add('hidden'); layer.innerHTML=''; render(); if(typeof onSave==='function') onSave(); else toast('Preferências salvas.'); };
+  };
+  bind();
+}
 function buildDietAIPayload(){
   const p=profile();
   return {
     kind:'diet-plan',
+    foodPrefs:foodPrefs(p),
     profile:{name:p.name, sex:p.sex, age:p.age, height:p.height, weight:p.weight, goal:p.goal, focus:p.focus, experience:normalizeExperienceLabel(p.experience), daysPerWeek:String(clampTrainingDays(p.daysPerWeek)), notes:p.notes},
     routine:{...(p.routine||{}), summary:routineSummary(p), suggestedWorkoutTime:suggestedWorkoutTimeFromRoutineV74(p), workoutRecommendation:workoutTimeRecommendation(p)},
     reminders:p.reminders || {},
@@ -4894,7 +5346,10 @@ async function callDietAI(){
   if(!response.ok) throw new Error(data.error || `Erro HTTP ${response.status}`);
   return data.diet || data.plan || data;
 }
-async function generateDietPlan(){
+async function generateDietPlan(force=false){
+  const blocked=dietBlockReason();
+  if(blocked){ toast(blocked); return; }
+  if(!force && !foodPrefs().done){ openFoodPrefsModal(()=>generateDietPlan(true)); return; }
   try{
     toast('Gerando rotina alimentar...');
     const diet=await callDietAI();
@@ -4933,7 +5388,7 @@ async function finishCycleAndGeneratePlan(){
   }
 }
 
-function exportBackup(){ state.lastBackupAt=nowISO(); save(); const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`gym-bronze-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href); }
+function exportBackup(){ state.lastBackupAt=nowISO(); save(); const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`gym-bronze-backup-${dateKey()}.json`; a.click(); URL.revokeObjectURL(a.href); }
 document.addEventListener('change', e=>{ if(e.target?.id==='backupInput'){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ const data=JSON.parse(r.result); if(!data.profiles) throw new Error(); if(confirm('Importar backup e substituir dados atuais?')){ state=data; save(); render(); toast('Backup importado.'); } }catch{ toast('Backup inválido.'); }}; r.readAsText(f); }});
 function toast(msg){ const t=byId('toast'); t.textContent=msg; t.classList.remove('hidden'); clearTimeout(window.__toast); window.__toast=setTimeout(()=>t.classList.add('hidden'),2800); }
 
