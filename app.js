@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'gymBronze.v579';
-const APP_VERSION = '7.9.0';
+const APP_VERSION = '7.9.1';
 const PUSH_API_PATH = '/api/push-subscription';
 const AI_ENDPOINT_PATH = '/api/workout-report';
 const AI_PLAN_ENDPOINT_PATH = '/api/workout-plan';
@@ -1672,6 +1672,7 @@ function init(){
   byId('openLevelModal')?.addEventListener('click', openLevelModal);
   wireThemeEvents();
   wireSnapshotEvents();
+  wireRenderGuard();
   render();
 }
 // v7.7.3: guard asynchronous cloud reads against local edits and pending writes.
@@ -1953,7 +1954,29 @@ function goNutritionChecklist(){
   setScreen('coach', {scrollTo:'nutritionChecklistCard'});
 }
 function titleFor(s){ return {home:'Hoje',workouts:'Treinos',lessons:'Aulas',checkin:'Check-in',coach:'Nutri',progress:'Progresso',profile:'Perfil'}[s] || 'Hoje'; }
+// v7.9.1: re-desenhos de fundo (login, rede, sincronização) NÃO podem destruir um campo em edição,
+// senão o teclado fecha sozinho. Toques do usuário continuam renderizando na hora.
+var __lastGestureAt=0, __renderPending=false;
+function typingInContent(){
+  const ae=document.activeElement;
+  return !!(ae && ae.matches && ae.matches('input,textarea,select') && ae.closest('#content'));
+}
+function wireRenderGuard(){
+  const mark=e=>{ const t=e.target; if(t && t.closest && t.closest('input,textarea,select')) return; __lastGestureAt=Date.now(); };
+  document.addEventListener('pointerdown',mark,true);
+  document.addEventListener('touchstart',mark,true);
+  document.addEventListener('click',mark,true);
+  document.addEventListener('focusout',()=>{
+    if(!__renderPending) return;
+    setTimeout(()=>{ if(__renderPending && !typingInContent()){ __renderPending=false; renderNow(); } },300);
+  },true);
+}
 function render(){
+  if(typingInContent() && Date.now()-__lastGestureAt>700){ __renderPending=true; return; }
+  __renderPending=false;
+  renderNow();
+}
+function renderNow(){
   const p = profile();
   if(shouldShowOnboarding()){
     document.body.classList.add('onboarding-active');
